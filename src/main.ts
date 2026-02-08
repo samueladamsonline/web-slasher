@@ -30,11 +30,14 @@ type MapKey = 'overworld' | 'cave'
 const DEPTH_GROUND = 0
 const DEPTH_WARP = 5
 const DEPTH_PLAYER = 10
+const DEPTH_HITBOX = 11
+const DEPTH_ENEMY = 9
 const DEPTH_UI = 1000
 
 class GameScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
   private wasd!: { up: Phaser.Input.Keyboard.Key; down: Phaser.Input.Keyboard.Key; left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key }
+  private attackKey!: Phaser.Input.Keyboard.Key
   private player!: Phaser.Physics.Arcade.Sprite
   private speed = 240
   private facing: Facing = 'down'
@@ -43,10 +46,15 @@ class GameScene extends Phaser.Scene {
   private map?: Phaser.Tilemaps.Tilemap
   private groundLayer?: Phaser.Tilemaps.TilemapLayer
   private groundCollider?: Phaser.Physics.Arcade.Collider
+  private enemies?: Phaser.Physics.Arcade.Group
+  private enemyGroundCollider?: Phaser.Physics.Arcade.Collider
+  private enemyPlayerCollider?: Phaser.Physics.Arcade.Collider
   private warpZones: Phaser.GameObjects.Zone[] = []
   private warpIndicators: Phaser.GameObjects.GameObject[] = []
   private warpOverlaps: Phaser.Physics.Arcade.Collider[] = []
+  private attackHitboxes: Phaser.GameObjects.GameObject[] = []
   private transitioning = false
+  private attackLock = false
 
   constructor() {
     super('game')
@@ -61,6 +69,20 @@ class GameScene extends Phaser.Scene {
     this.load.image('overworldTiles', '/tilesets/overworld.png')
     this.load.tilemapTiledJSON('overworld', '/maps/overworld.json')
     this.load.tilemapTiledJSON('cave', '/maps/cave.json')
+
+    // Enemy placeholder texture.
+    const g = this.add.graphics()
+    g.fillStyle(0x42d36d, 1)
+    g.fillRoundedRect(0, 0, 44, 34, 16)
+    g.fillStyle(0x2a7a3f, 0.75)
+    g.fillEllipse(22, 28, 36, 14)
+    g.fillStyle(0x0a0d12, 0.9)
+    g.fillCircle(15, 14, 3)
+    g.fillCircle(29, 14, 3)
+    g.lineStyle(3, 0x0a0d12, 0.65)
+    g.strokeRoundedRect(0, 0, 44, 34, 16)
+    g.generateTexture('slime', 44, 34)
+    g.destroy()
   }
 
   create() {
@@ -72,6 +94,7 @@ class GameScene extends Phaser.Scene {
       down: Phaser.Input.Keyboard.KeyCodes.S,
       right: Phaser.Input.Keyboard.KeyCodes.D,
     }) as { up: Phaser.Input.Keyboard.Key; down: Phaser.Input.Keyboard.Key; left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key }
+    this.attackKey = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
 
     // Create the player once and keep it across map loads.
     this.player = this.physics.add.sprite(0, 0, 'hero', this.frameFor(this.facing, 0))
@@ -135,6 +158,11 @@ class GameScene extends Phaser.Scene {
 
     this.groundCollider = this.physics.add.collider(this.player, ground)
 
+    this.enemies = this.physics.add.group()
+    this.spawnEnemiesFromObjects(map)
+    this.enemyGroundCollider = this.physics.add.collider(this.enemies, ground)
+    this.enemyPlayerCollider = this.physics.add.collider(this.player, this.enemies)
+
     this.installWarps(map)
 
     this.refreshDbg()
@@ -153,6 +181,20 @@ class GameScene extends Phaser.Scene {
     }
     this.warpIndicators = []
 
+    for (const a of this.attackHitboxes) {
+      this.tweens.killTweensOf(a)
+      a.destroy()
+    }
+    this.attackHitboxes = []
+
+    this.enemyGroundCollider?.destroy()
+    this.enemyGroundCollider = undefined
+    this.enemyPlayerCollider?.destroy()
+    this.enemyPlayerCollider = undefined
+    this.enemies?.clear(true, true)
+    this.enemies?.destroy()
+    this.enemies = undefined
+
     this.groundCollider?.destroy()
     this.groundCollider = undefined
 
@@ -161,6 +203,34 @@ class GameScene extends Phaser.Scene {
 
     this.map?.destroy()
     this.map = undefined
+  }
+
+  private spawnEnemiesFromObjects(map: Phaser.Tilemaps.Tilemap) {
+    const layer = map.getObjectLayer('Objects')
+    const objects = layer?.objects ?? []
+
+    for (const o of objects) {
+      if (o.type !== 'enemy') continue
+      if (typeof o.x !== 'number' || typeof o.y !== 'number') continue
+
+      const props = (o.properties ?? []) as any[]
+      const hpRaw = props.find((p) => p?.name === 'hp')?.value
+      const hp = typeof hpRaw === 'number' ? Math.max(1, Math.floor(hpRaw)) : 3
+
+      const enemy = this.physics.add.sprite(o.x, o.y, 'slime')
+      enemy.setDepth(DEPTH_ENEMY)
+      enemy.setOrigin(0.5, 0.9)
+      enemy.setCollideWorldBounds(true)
+      enemy.setDataEnabled()
+      enemy.setData('hp', hp)
+      enemy.setData('invulnUntil', 0)
+
+      const body = enemy.body as Phaser.Physics.Arcade.Body
+      body.setSize(34, 22)
+      body.setOffset((44 - 34) / 2, 34 - 22 - 4)
+
+      this.enemies?.add(enemy)
+    }
   }
 
   private installWarps(map: Phaser.Tilemaps.Tilemap) {
@@ -274,6 +344,12 @@ class GameScene extends Phaser.Scene {
     ;(window as any).__dbg = {
       player: this.player,
       mapKey: this.currentMapKey,
+      getEnemies: () => {
+        const enemies = this.enemies?.getChildren?.() ?? []
+        return enemies
+          .filter((e: any) => e?.active)
+          .map((e: any) => ({ x: e.x, y: e.y, hp: e.getData?.('hp') ?? null }))
+      },
       depths: {
         ground: this.groundLayer?.depth ?? null,
         player: this.player.depth,
@@ -323,6 +399,78 @@ class GameScene extends Phaser.Scene {
     } else {
       this.player.anims.stop()
       this.player.setFrame(this.frameFor(this.facing, 0))
+    }
+
+    if (Phaser.Input.Keyboard.JustDown(this.attackKey)) {
+      this.tryAttack()
+    }
+  }
+
+  private tryAttack() {
+    if (this.attackLock) return
+    if (!this.enemies) return
+
+    this.attackLock = true
+
+    const offset = 42
+    const sizeW = 50
+    const sizeH = 34
+
+    let hx = this.player.x
+    let hy = this.player.y
+    if (this.facing === 'up') hy -= offset
+    if (this.facing === 'down') hy += offset
+    if (this.facing === 'left') hx -= offset
+    if (this.facing === 'right') hx += offset
+
+    const hit = this.add.rectangle(hx, hy, sizeW, sizeH, 0xfff2a8, 0.12).setDepth(DEPTH_HITBOX)
+    this.physics.add.existing(hit)
+    const body = hit.body as Phaser.Physics.Arcade.Body
+    body.setAllowGravity(false)
+    body.setImmovable(true)
+
+    this.attackHitboxes.push(hit)
+
+    const hitThisAttack = new Set<Phaser.GameObjects.GameObject>()
+    const overlap = this.physics.add.overlap(hit, this.enemies, (_hb, e) => {
+      if (!e || !(e as any).active) return
+      if (hitThisAttack.has(e as any)) return
+      hitThisAttack.add(e as any)
+      this.damageEnemy(e as Phaser.Physics.Arcade.Sprite)
+    })
+
+    this.time.delayedCall(110, () => {
+      overlap.destroy()
+      hit.destroy()
+    })
+
+    this.time.delayedCall(220, () => {
+      this.attackLock = false
+    })
+  }
+
+  private damageEnemy(enemy: Phaser.Physics.Arcade.Sprite) {
+    const now = this.time.now
+    const inv = (enemy.getData('invulnUntil') as number) ?? 0
+    if (now < inv) return
+
+    const hp = (enemy.getData('hp') as number) ?? 1
+    const nextHp = hp - 1
+    enemy.setData('hp', nextHp)
+    enemy.setData('invulnUntil', now + 250)
+
+    enemy.setTintFill(0xffffff)
+    this.time.delayedCall(70, () => enemy.clearTint())
+
+    // Knockback.
+    const dx = enemy.x - this.player.x
+    const dy = enemy.y - this.player.y
+    const v = new Phaser.Math.Vector2(dx, dy).normalize().scale(220)
+    enemy.setVelocity(v.x, v.y)
+    this.time.delayedCall(120, () => enemy.setVelocity(0, 0))
+
+    if (nextHp <= 0) {
+      this.time.delayedCall(60, () => enemy.destroy())
     }
   }
 }

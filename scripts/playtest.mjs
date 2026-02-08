@@ -53,6 +53,10 @@ async function getDepths(page) {
   return await page.evaluate(() => globalThis.__dbg?.depths ?? null)
 }
 
+async function getEnemies(page) {
+  return await page.evaluate(() => (typeof globalThis.__dbg?.getEnemies === 'function' ? globalThis.__dbg.getEnemies() : null))
+}
+
 async function waitForMapKey(page, expected, timeoutMs = 2500) {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
@@ -170,6 +174,23 @@ try {
   else if (!(typeof depths.player === 'number' && typeof depths.ground === 'number'))
     errors.push(`expected numeric depths; got ${JSON.stringify(depths)}`)
   else if (depths.player <= depths.ground) errors.push(`expected player above ground; playerDepth=${depths.player} groundDepth=${depths.ground}`)
+
+  // Combat sanity: enemy exists and can be damaged with Space.
+  const enemies0 = await getEnemies(page)
+  if (!Array.isArray(enemies0) || enemies0.length < 1) errors.push(`expected at least 1 enemy; got ${JSON.stringify(enemies0)}`)
+  else {
+    const e0 = enemies0[0]
+    await teleportPlayer(page, e0.x - 42, e0.y)
+    await page.waitForTimeout(100)
+    await page.keyboard.press('Space')
+    await page.waitForTimeout(250)
+    const enemies1 = await getEnemies(page)
+    const hp0 = e0.hp
+    const hp1 = Array.isArray(enemies1) && enemies1.length ? enemies1[0].hp : null
+    if (!(typeof hp0 === 'number' && typeof hp1 === 'number'))
+      errors.push(`expected numeric enemy hp; before=${JSON.stringify(enemies0)} after=${JSON.stringify(enemies1)}`)
+    else if (hp1 >= hp0) errors.push(`expected enemy hp to drop; before=${hp0} after=${hp1}`)
+  }
 
   // Warp zones are 64x64 at x=1280..1344, y=768..832 in both maps (see map JSON).
   await teleportPlayer(page, 1312, 800)
