@@ -77,6 +77,22 @@ async function getPlayerMaxHp(page) {
   )
 }
 
+async function getGameState(page) {
+  return await page.evaluate(() => (typeof globalThis.__dbg?.getGameState === 'function' ? globalThis.__dbg.getGameState() : null))
+}
+
+async function togglePause(page) {
+  await page.evaluate(() => globalThis.__dbg?.togglePause?.())
+}
+
+async function respawn(page) {
+  await page.evaluate(() => globalThis.__dbg?.respawn?.())
+}
+
+async function setPlayerHp(page, hp) {
+  await page.evaluate(({ hp }) => globalThis.__dbg?.setPlayerHp?.(hp), { hp })
+}
+
 async function pushIntoEnemyAndMeasureDrift(page, enemyKind, enemyX, enemyY) {
   // Freeze the enemy so any measured drift is due to player pushing, not AI wander.
   await page.evaluate(({ kind }) => {
@@ -308,6 +324,33 @@ try {
   const initialMapKey = await getMapKey(page)
   if (initialMapKey !== 'overworld') errors.push(`expected initial mapKey=overworld; got ${initialMapKey}`)
 
+  // Pause sanity: while paused, movement should not change position.
+  try {
+    await teleportPlayer(page, 200, 200)
+    await page.waitForTimeout(80)
+    const p0 = await getPlayerPos(page)
+    await togglePause(page)
+    await page.waitForTimeout(60)
+    await page.keyboard.down('d')
+    await page.waitForTimeout(800)
+    await page.keyboard.up('d')
+    await page.waitForTimeout(60)
+    const p1 = await getPlayerPos(page)
+    const st = await getGameState(page)
+    if (!st?.paused) throw new Error(`expected paused=true; state=${JSON.stringify(st)}`)
+    if (p0 && p1) {
+      const dx = Math.abs(p1.x - p0.x)
+      const dy = Math.abs(p1.y - p0.y)
+      if (dx > 1.5 || dy > 1.5) throw new Error(`expected no movement while paused; dx=${dx} dy=${dy}`)
+    }
+    await togglePause(page)
+    await page.waitForTimeout(60)
+    const st2 = await getGameState(page)
+    if (st2?.paused) throw new Error(`expected paused=false; state=${JSON.stringify(st2)}`)
+  } catch (e) {
+    errors.push(`expected pause behavior; ${String(e?.message ?? e)}`)
+  }
+
   const depths = await getDepths(page)
   if (!depths) errors.push('expected window.__dbg.depths to exist')
   else if (!(typeof depths.player === 'number' && typeof depths.ground === 'number'))
@@ -443,6 +486,22 @@ try {
   }
 
   // Warp zones are 64x64 at x=1280..1344, y=768..832 in both maps (see map JSON).
+  // Stabilize before warping: ensure we aren't paused or in game-over (which pauses physics),
+  // and reset HP so we don't unexpectedly die during map transition checks.
+  try {
+    const st0 = await getGameState(page)
+    if (st0?.paused) await togglePause(page)
+    if (st0?.gameOver) {
+      await respawn(page)
+      await page.waitForTimeout(400)
+    }
+    const max = await getPlayerMaxHp(page)
+    if (typeof max === 'number') await setPlayerHp(page, max)
+    await page.waitForTimeout(450)
+  } catch {
+    // ignore; these are only for test stability
+  }
+
   await teleportPlayer(page, 1312, 800)
   await page.waitForTimeout(200)
   try {
@@ -475,6 +534,31 @@ try {
     if (hp1 !== expected) throw new Error(`expected bat touchDamage=2; hp0=${hp0} hp1=${hp1} expected=${expected}`)
   } catch (e) {
     errors.push(`expected touchDamage override; ${String(e?.message ?? e)}`)
+  }
+
+  // Game over + respawn: drop to 0 hp then respawn at checkpoint.
+  try {
+    const enemiesNow = await getEnemies(page)
+    const bat = Array.isArray(enemiesNow) ? enemiesNow.find((e) => e.kind === 'bat') : null
+    if (!bat) throw new Error('bat not found for game-over test')
+
+    await setPlayerHp(page, 2)
+    await page.waitForTimeout(50)
+    await teleportPlayer(page, typeof bat.bx === 'number' ? bat.bx : bat.x, typeof bat.by === 'number' ? bat.by : bat.y)
+    await page.waitForTimeout(400)
+    const st = await getGameState(page)
+    if (!st?.gameOver) throw new Error(`expected gameOver=true; state=${JSON.stringify(st)}`)
+
+    await respawn(page)
+    await page.waitForTimeout(350)
+    const st2 = await getGameState(page)
+    if (st2?.gameOver) throw new Error(`expected gameOver=false after respawn; state=${JSON.stringify(st2)}`)
+    const hp = await getPlayerHp(page)
+    const max = await getPlayerMaxHp(page)
+    if (!(typeof hp === 'number' && typeof max === 'number')) throw new Error(`hp/max not numeric after respawn; hp=${hp} max=${max}`)
+    if (hp !== max) throw new Error(`expected hp reset to max after respawn; hp=${hp} max=${max}`)
+  } catch (e) {
+    errors.push(`expected game over + respawn; ${String(e?.message ?? e)}`)
   }
 
   await teleportPlayer(page, 1312, 800)

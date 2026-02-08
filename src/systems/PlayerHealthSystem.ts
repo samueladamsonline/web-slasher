@@ -50,6 +50,19 @@ export class PlayerHealthSystem {
     return this.maxHp
   }
 
+  setHp(hp: number) {
+    const next = Math.max(0, Math.min(this.maxHp, Math.floor(hp)))
+    this.hp = next
+    this.ui.set(this.maxHp, this.hp)
+  }
+
+  reset() {
+    this.hp = this.maxHp
+    this.invulnUntil = 0
+    this.warpLockUntil = 0
+    this.ui.set(this.maxHp, this.hp)
+  }
+
   canWarp() {
     return this.scene.time.now >= this.warpLockUntil
   }

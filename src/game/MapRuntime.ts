@@ -7,6 +7,7 @@ type GameObj = Phaser.GameObjects.GameObject
 
 type MapRuntimeState = {
   mapKey: MapKey
+  spawnName: string
   map: Phaser.Tilemaps.Tilemap
   ground: Phaser.Tilemaps.TilemapLayer
   enemies: Phaser.Physics.Arcade.Group
@@ -46,6 +47,10 @@ export class MapRuntime {
 
   get enemies() {
     return this.state?.enemies
+  }
+
+  get spawnName() {
+    return this.state?.spawnName ?? null
   }
 
   get groundDepth() {
@@ -88,7 +93,7 @@ export class MapRuntime {
     this.spawnEnemiesFromObjects(map, enemies)
     this.enemyGroundCollider = this.scene.physics.add.collider(enemies, ground)
 
-    this.state = { mapKey, map, ground, enemies }
+    this.state = { mapKey, spawnName, map, ground, enemies }
 
     this.installWarps(map)
 

@@ -7,10 +7,15 @@ import { Enemy } from '../entities/Enemy'
 import { EnemyAISystem } from '../systems/EnemyAISystem'
 import { PlayerHealthSystem } from '../systems/PlayerHealthSystem'
 import { HeartsUI } from '../ui/HeartsUI'
+import { MapNameUI } from '../ui/MapNameUI'
+import { OverlayUI } from '../ui/OverlayUI'
 
 export class GameScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
   private wasd!: { up: Phaser.Input.Keyboard.Key; down: Phaser.Input.Keyboard.Key; left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key }
+  private keyEsc!: Phaser.Input.Keyboard.Key
+  private keyI!: Phaser.Input.Keyboard.Key
+  private keyEnter!: Phaser.Input.Keyboard.Key
 
   private player!: Phaser.Physics.Arcade.Sprite
   private speed = 240
@@ -20,6 +25,12 @@ export class GameScene extends Phaser.Scene {
   private combat!: CombatSystem
   private enemyAI!: EnemyAISystem
   private health!: PlayerHealthSystem
+  private mapNameUI!: MapNameUI
+  private overlay!: OverlayUI
+
+  private paused = false
+  private gameOver = false
+  private checkpoint: { mapKey: string; spawnName: string } = { mapKey: 'overworld', spawnName: 'player_spawn' }
 
   constructor() {
     super('game')
@@ -46,6 +57,9 @@ export class GameScene extends Phaser.Scene {
       down: Phaser.Input.Keyboard.KeyCodes.S,
       right: Phaser.Input.Keyboard.KeyCodes.D,
     }) as { up: Phaser.Input.Keyboard.Key; down: Phaser.Input.Keyboard.Key; left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key }
+    this.keyEsc = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC)
+    this.keyI = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I)
+    this.keyEnter = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER)
 
     this.player = this.physics.add.sprite(0, 0, 'hero', this.frameFor(this.facing, 0))
     this.player.setOrigin(0.5, 0.8)
@@ -60,9 +74,14 @@ export class GameScene extends Phaser.Scene {
     this.createHeroAnims()
     this.createEnemyAnims()
 
+    this.mapNameUI = new MapNameUI(this)
+    this.overlay = new OverlayUI(this)
+
     this.mapRuntime = new MapRuntime(this, this.player, {
       onChanged: () => {
         this.health?.onMapChanged?.()
+        this.updateCheckpoint()
+        this.mapNameUI.set(this.mapRuntime.mapKey)
         this.refreshDbg()
       },
       canWarp: () => (typeof this.health?.canWarp === 'function' ? this.health.canWarp() : true),
@@ -81,12 +100,25 @@ export class GameScene extends Phaser.Scene {
     this.enemyAI = new EnemyAISystem(this.player, () => this.mapRuntime.enemies)
 
     this.mapRuntime.load('overworld', 'player_spawn')
+    this.updateCheckpoint()
+    this.mapNameUI.set(this.mapRuntime.mapKey)
 
     this.refreshDbg()
-
   }
 
   update() {
+    if (!this.gameOver && (Phaser.Input.Keyboard.JustDown(this.keyEsc) || Phaser.Input.Keyboard.JustDown(this.keyI))) {
+      this.setPaused(!this.paused)
+      this.refreshDbg()
+    }
+
+    if (this.gameOver) {
+      if (Phaser.Input.Keyboard.JustDown(this.keyEnter)) this.respawn()
+      return
+    }
+
+    if (this.paused) return
+
     const left = !!this.cursors.left?.isDown || !!this.wasd.left?.isDown
     const right = !!this.cursors.right?.isDown || !!this.wasd.right?.isDown
     const up = !!this.cursors.up?.isDown || !!this.wasd.up?.isDown
@@ -109,6 +141,11 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.health.update()
+    if (this.health.getHp() <= 0) {
+      this.triggerGameOver()
+      this.refreshDbg()
+      return
+    }
     this.combat.update()
     this.enemyAI.update(this.time.now)
   }
@@ -159,11 +196,13 @@ export class GameScene extends Phaser.Scene {
     ;(window as any).__dbg = {
       player: this.player,
       mapKey: this.mapRuntime.mapKey,
+      spawnName: this.mapRuntime.spawnName,
       facing: this.facing,
       getLastAttack: () => this.combat?.getDebug?.() ?? { at: 0, hits: 0 },
       tryAttack: () => this.combat?.tryAttack?.(),
       getPlayerHp: () => this.health?.getHp?.() ?? null,
       getPlayerMaxHp: () => this.health?.getMaxHp?.() ?? null,
+      setPlayerHp: (hp: number) => this.health?.setHp?.(hp),
       enemyCount: rawEnemies.length,
       enemyActives: rawEnemies.map((e: any) => e?.active ?? null),
       getEnemies: () => {
@@ -179,10 +218,61 @@ export class GameScene extends Phaser.Scene {
               : { kind: null, x: e.x, y: e.y, bx, by, hp: null }
           })
       },
+      getGameState: () => ({ paused: this.paused, gameOver: this.gameOver, checkpoint: { ...this.checkpoint } }),
+      togglePause: () => this.setPaused(!this.paused),
+      respawn: () => this.respawn(),
       depths: {
         ground: this.mapRuntime.groundDepth,
         player: this.player.depth,
       },
     }
+  }
+
+  private updateCheckpoint() {
+    const mk = this.mapRuntime.mapKey
+    const sn = this.mapRuntime.spawnName
+    if (typeof mk === 'string' && mk && typeof sn === 'string' && sn) this.checkpoint = { mapKey: mk, spawnName: sn }
+  }
+
+  private setPaused(paused: boolean) {
+    if (this.paused === paused) return
+    this.paused = paused
+
+    if (this.paused) {
+      this.player.setVelocity(0, 0)
+      this.physics.world.pause()
+      this.anims.pauseAll()
+      this.overlay.showPause(['ESC or I: Resume', '', 'Inventory (stub)', '- Sword: Basic', '- Keys: 0'])
+    } else {
+      this.physics.world.resume()
+      this.anims.resumeAll()
+      this.overlay.hide()
+    }
+  }
+
+  private triggerGameOver() {
+    if (this.gameOver) return
+    this.gameOver = true
+    this.paused = false
+
+    this.player.setVelocity(0, 0)
+    this.physics.world.pause()
+    this.anims.pauseAll()
+    this.overlay.showGameOver(['Press ENTER to respawn at last checkpoint.'])
+  }
+
+  private respawn() {
+    if (!this.gameOver) return
+    this.gameOver = false
+
+    this.health.reset()
+    this.physics.world.resume()
+    this.anims.resumeAll()
+    this.overlay.hide()
+
+    this.mapRuntime.load(this.checkpoint.mapKey as any, this.checkpoint.spawnName)
+    this.updateCheckpoint()
+    this.mapNameUI.set(this.mapRuntime.mapKey)
+    this.refreshDbg()
   }
 }
