@@ -1,7 +1,7 @@
 import * as Phaser from 'phaser'
 import { CombatSystem } from '../game/CombatSystem'
 import { MapRuntime } from '../game/MapRuntime'
-import { DEPTH_PLAYER, DEPTH_UI, HERO_H, HERO_W } from '../game/constants'
+import { DEPTH_PLAYER, HERO_H, HERO_W } from '../game/constants'
 import type { Facing } from '../game/types'
 import { Enemy } from '../entities/Enemy'
 import { EnemyAISystem } from '../systems/EnemyAISystem'
@@ -84,16 +84,6 @@ export class GameScene extends Phaser.Scene {
 
     this.refreshDbg()
 
-    this.add
-      .text(24, 24, 'Top-Down RPG Starter', {
-        fontFamily: 'Georgia, serif',
-        fontSize: '24px',
-        color: '#f4f2ec',
-        backgroundColor: 'rgba(0,0,0,0.45)',
-        padding: { left: 12, right: 12, top: 8, bottom: 8 },
-      })
-      .setDepth(DEPTH_UI)
-      .setScrollFactor(0)
   }
 
   update() {
