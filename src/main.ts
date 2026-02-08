@@ -57,101 +57,11 @@ class GameScene extends Phaser.Scene {
     g.generateTexture('tile-rock', TILE_SIZE, TILE_SIZE)
     g.clear()
 
-    const facings: Facing[] = ['down', 'up', 'left', 'right']
-    for (const facing of facings) {
-      for (let step = 0; step < 3; step++) {
-        this.generateHeroFrame(g, `hero-${facing}-${step}`, facing, step)
-      }
-    }
-
     g.destroy()
-  }
 
-  private generateHeroFrame(g: Phaser.GameObjects.Graphics, key: string, facing: Facing, step: number) {
-    g.clear()
-
-    // Shadow at the feet.
-    g.fillStyle(0x000000, 0.18)
-    g.fillEllipse(HERO_W / 2, HERO_H - 10, 30, 10)
-
-    // Leg/step offsets (simple walk cycle).
-    const stride = step === 1 ? 3 : 0
-    const legA = step === 2 ? 2 : 0
-    const legB = step === 0 ? 2 : 0
-
-    // Legs (slightly different per facing so up doesn't look identical).
-    const legY = HERO_H - 26
-    const legColor = 0x2b2b2b
-    g.fillStyle(legColor, 1)
-    if (facing === 'left' || facing === 'right') {
-      g.fillRoundedRect(16 + stride, legY + legA, 8, 16, 4)
-      g.fillRoundedRect(24 - stride, legY + legB, 8, 16, 4)
-    } else {
-      g.fillRoundedRect(16, legY + stride + legA, 8, 16, 4)
-      g.fillRoundedRect(24, legY - stride + legB, 8, 16, 4)
-    }
-
-    // Body.
-    const bodyX = 10
-    const bodyY = 26
-    const bodyW = 28
-    const bodyH = 34
-    g.fillStyle(0x4b7bff, 1)
-    g.fillRoundedRect(bodyX, bodyY, bodyW, bodyH, 12)
-
-    // Cape/back-shading for "up" to help readability.
-    if (facing === 'up') {
-      g.fillStyle(0x2f58cc, 0.7)
-      g.fillRoundedRect(bodyX + 2, bodyY + 2, bodyW - 4, 14, 10)
-    }
-
-    // Arms.
-    g.fillStyle(0xf2c9a0, 1)
-    if (facing === 'left') {
-      g.fillRoundedRect(6, 34, 10, 12, 6)
-      g.fillRoundedRect(28, 34, 10, 10, 6)
-    } else if (facing === 'right') {
-      g.fillRoundedRect(10, 34, 10, 10, 6)
-      g.fillRoundedRect(32, 34, 10, 12, 6)
-    } else {
-      g.fillRoundedRect(6, 34, 10, 12, 6)
-      g.fillRoundedRect(32, 34, 10, 12, 6)
-    }
-
-    // Head.
-    const headY = 16 + (step === 1 ? 1 : 0)
-    g.fillStyle(0xf2c9a0, 1)
-    g.fillCircle(HERO_W / 2, headY, 12)
-
-    // Hair + face direction cue.
-    g.fillStyle(0x2a1b0f, 1)
-    g.fillCircle(HERO_W / 2, headY - 4, 12)
-    g.fillStyle(0xf2c9a0, 1)
-    g.fillCircle(HERO_W / 2, headY + 1, 11)
-
-    g.fillStyle(0x1b1b1b, 0.9)
-    if (facing === 'down') {
-      g.fillCircle(HERO_W / 2 - 4, headY - 1, 1.5)
-      g.fillCircle(HERO_W / 2 + 4, headY - 1, 1.5)
-      g.fillRoundedRect(HERO_W / 2 - 5, headY + 6, 10, 2, 1)
-    } else if (facing === 'left') {
-      g.fillCircle(HERO_W / 2 - 6, headY - 1, 1.5)
-      g.fillRoundedRect(HERO_W / 2 - 6, headY + 6, 8, 2, 1)
-    } else if (facing === 'right') {
-      g.fillCircle(HERO_W / 2 + 6, headY - 1, 1.5)
-      g.fillRoundedRect(HERO_W / 2 - 2, headY + 6, 8, 2, 1)
-    } else {
-      // Up: no face.
-      g.fillStyle(0x1b1b1b, 0.15)
-      g.fillCircle(HERO_W / 2, headY + 2, 10)
-    }
-
-    // Outline.
-    g.lineStyle(3, 0x1b1b1b, 0.9)
-    g.strokeRoundedRect(bodyX, bodyY, bodyW, bodyH, 12)
-    g.strokeCircle(HERO_W / 2, headY, 12)
-
-    g.generateTexture(key, HERO_W, HERO_H)
+    // Real sprite pipeline: load a spritesheet from /public.
+    // Layout: 3 columns (walk frames), 4 rows (down, up, left, right).
+    this.load.spritesheet('hero', '/sprites/hero.png', { frameWidth: HERO_W, frameHeight: HERO_H })
   }
 
   create() {
@@ -198,7 +108,7 @@ class GameScene extends Phaser.Scene {
       rocks.create(gx * TILE_SIZE + TILE_SIZE / 2, gy * TILE_SIZE + TILE_SIZE / 2, 'tile-rock')
     }
 
-    this.player = this.physics.add.sprite(320, 320, 'hero-down-0')
+    this.player = this.physics.add.sprite(320, 320, 'hero', this.frameFor(this.facing, 0))
     this.player.setOrigin(0.5, 0.8)
     this.player.setCollideWorldBounds(true)
     const body = this.player.body as Phaser.Physics.Arcade.Body
@@ -230,11 +140,21 @@ class GameScene extends Phaser.Scene {
     for (const facing of facings) {
       this.anims.create({
         key: `hero-walk-${facing}`,
-        frames: [{ key: `hero-${facing}-0` }, { key: `hero-${facing}-1` }, { key: `hero-${facing}-2` }, { key: `hero-${facing}-1` }],
+        frames: [
+          { key: 'hero', frame: this.frameFor(facing, 0) },
+          { key: 'hero', frame: this.frameFor(facing, 1) },
+          { key: 'hero', frame: this.frameFor(facing, 2) },
+          { key: 'hero', frame: this.frameFor(facing, 1) },
+        ],
         frameRate: 10,
         repeat: -1,
       })
     }
+  }
+
+  private frameFor(facing: Facing, step: 0 | 1 | 2) {
+    const rowByFacing: Record<Facing, number> = { down: 0, up: 1, left: 2, right: 3 }
+    return rowByFacing[facing] * 3 + step
   }
 
   update() {
@@ -256,7 +176,7 @@ class GameScene extends Phaser.Scene {
       this.player.anims.play(`hero-walk-${this.facing}`, true)
     } else {
       this.player.anims.stop()
-      this.player.setTexture(`hero-${this.facing}-0`)
+      this.player.setFrame(this.frameFor(this.facing, 0))
     }
   }
 }
