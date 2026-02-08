@@ -61,6 +61,19 @@ async function getLastAttack(page) {
   return await page.evaluate(() => globalThis.__dbg?.lastAttack ?? null)
 }
 
+async function pushIntoEnemyAndMeasureDrift(page, enemyX, enemyY) {
+  // Push right into the enemy for a bit; enemy should not get shoved across the map.
+  await teleportPlayer(page, enemyX - 90, enemyY)
+  await page.waitForTimeout(120)
+  await page.keyboard.down('d')
+  await page.waitForTimeout(1200)
+  await page.keyboard.up('d')
+  await page.waitForTimeout(100)
+  const enemies = await getEnemies(page)
+  if (!Array.isArray(enemies) || enemies.length < 1) return null
+  return { x: enemies[0].x, y: enemies[0].y }
+}
+
 async function waitForMapKey(page, expected, timeoutMs = 2500) {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
@@ -184,6 +197,11 @@ try {
   if (!Array.isArray(enemies0) || enemies0.length < 1) errors.push(`expected at least 1 enemy; got ${JSON.stringify(enemies0)}`)
   else {
     const e0 = enemies0[0]
+    const driftPos = await pushIntoEnemyAndMeasureDrift(page, e0.x, e0.y)
+    if (driftPos) {
+      const drift = Math.hypot(driftPos.x - e0.x, driftPos.y - e0.y)
+      if (drift > 12) errors.push(`enemy drifted too much from player collision push; drift=${drift.toFixed(2)}px`)
+    }
     await teleportPlayer(page, e0.x - 42, e0.y)
     await page.waitForTimeout(100)
     // Face right so the hitbox is created over the enemy.

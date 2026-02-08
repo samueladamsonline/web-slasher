@@ -84,19 +84,44 @@ class GameScene extends Phaser.Scene {
     g.generateTexture('slime', 44, 34)
     g.clear()
 
-    // Sword slash swish (64x64).
-    g.lineStyle(12, 0xfff2a8, 0.85)
-    g.beginPath()
-    g.moveTo(12, 50)
-    g.lineTo(52, 14)
-    g.strokePath()
+    // Sword (64x64): blade + hilt. We'll animate its rotation for the swing.
+    // Draw it pointing "right" (0 radians); rotate for other facings.
+    g.fillStyle(0x3b2a1a, 1) // handle
+    g.fillRoundedRect(10, 30, 12, 6, 3)
+    g.fillStyle(0xb08a5a, 1) // pommel
+    g.fillCircle(10, 33, 4)
+    g.fillStyle(0x1b1b1b, 0.75) // guard
+    g.fillRoundedRect(18, 26, 6, 14, 3)
 
-    g.lineStyle(6, 0xffffff, 0.55)
-    g.beginPath()
-    g.moveTo(18, 48)
-    g.lineTo(54, 18)
-    g.strokePath()
+    g.fillStyle(0xd9e3ee, 1) // blade
+    g.fillRoundedRect(22, 30, 34, 6, 3)
+    g.fillStyle(0xffffff, 0.7) // blade highlight
+    g.fillRoundedRect(26, 31, 26, 2, 1)
+    g.fillStyle(0xb2c0cf, 0.85) // blade edge shadow
+    g.fillRoundedRect(26, 34, 26, 1, 1)
+    g.fillStyle(0xd9e3ee, 1) // tip
+    g.fillTriangle(56, 30, 64, 33, 56, 36)
 
+    g.lineStyle(3, 0x0a0d12, 0.55)
+    g.strokeRoundedRect(22, 30, 34, 6, 3)
+    g.strokeRoundedRect(18, 26, 6, 14, 3)
+    g.strokeRoundedRect(10, 30, 12, 6, 3)
+    g.strokeTriangle(56, 30, 64, 33, 56, 36)
+
+    g.generateTexture('sword', 64, 64)
+    g.clear()
+
+    // Sword slash swish (64x64) as a subtle trail (kept lightweight).
+    g.lineStyle(10, 0xfff2a8, 0.55)
+    g.beginPath()
+    g.moveTo(14, 52)
+    g.lineTo(54, 12)
+    g.strokePath()
+    g.lineStyle(5, 0xffffff, 0.35)
+    g.beginPath()
+    g.moveTo(20, 52)
+    g.lineTo(56, 18)
+    g.strokePath()
     g.generateTexture('slash', 64, 64)
     g.destroy()
   }
@@ -238,6 +263,7 @@ class GameScene extends Phaser.Scene {
       enemy.setDepth(DEPTH_ENEMY)
       enemy.setOrigin(0.5, 0.9)
       enemy.setCollideWorldBounds(true)
+      enemy.setPushable(false)
       enemy.setDataEnabled()
       enemy.setData('hp', hp)
       enemy.setData('invulnUntil', 0)
@@ -456,25 +482,49 @@ class GameScene extends Phaser.Scene {
       this.damageEnemy(go as Phaser.Physics.Arcade.Sprite)
     }
 
-    const slash = this.add.image(hx, hy, 'slash').setDepth(DEPTH_HITBOX).setAlpha(0.95)
-    slash.setBlendMode(Phaser.BlendModes.ADD)
-
     const rotByFacing: Record<Facing, number> = {
       right: 0,
       down: Math.PI / 2,
       left: Math.PI,
       up: -Math.PI / 2,
     }
-    slash.setRotation(rotByFacing[this.facing])
-    slash.setScale(0.8)
+    const baseRot = rotByFacing[this.facing]
+
+    const sword = this.add.image(this.player.x, this.player.y, 'sword').setDepth(DEPTH_HITBOX).setAlpha(1)
+    sword.setOrigin(0.2, 0.5) // near handle
+    sword.setRotation(baseRot)
+
+    const slash = this.add.image(hx, hy, 'slash').setDepth(DEPTH_HITBOX).setAlpha(0.6)
+    slash.setBlendMode(Phaser.BlendModes.ADD)
+    slash.setRotation(baseRot)
+    slash.setScale(0.85)
+
+    // Position the sword slightly ahead of the player, in the facing direction.
+    const swordOffset = 22
+    const sx = this.player.x + Math.cos(baseRot) * swordOffset
+    const sy = this.player.y + Math.sin(baseRot) * swordOffset
+    sword.setPosition(sx, sy)
+
+    const swing = 0.55
+    const from = baseRot - swing
+    const to = baseRot + swing
+    sword.setRotation(from)
 
     this.tweens.add({
       targets: slash,
-      alpha: { from: 0.95, to: 0 },
-      scale: { from: 0.8, to: 1.15 },
+      alpha: { from: 0.6, to: 0 },
+      scale: { from: 0.85, to: 1.15 },
       duration: 140,
       ease: 'sine.out',
       onComplete: () => slash.destroy(),
+    })
+
+    this.tweens.add({
+      targets: sword,
+      rotation: { from, to },
+      duration: 120,
+      ease: 'sine.inOut',
+      onComplete: () => sword.destroy(),
     })
     this.refreshDbg()
 
