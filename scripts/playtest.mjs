@@ -49,6 +49,10 @@ async function getMapKey(page) {
   return await page.evaluate(() => globalThis.__dbg?.mapKey ?? null)
 }
 
+async function getDepths(page) {
+  return await page.evaluate(() => globalThis.__dbg?.depths ?? null)
+}
+
 async function waitForMapKey(page, expected, timeoutMs = 2500) {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
@@ -160,6 +164,12 @@ try {
   // Warp sanity: overworld -> cave -> overworld
   const initialMapKey = await getMapKey(page)
   if (initialMapKey !== 'overworld') errors.push(`expected initial mapKey=overworld; got ${initialMapKey}`)
+
+  const depths = await getDepths(page)
+  if (!depths) errors.push('expected window.__dbg.depths to exist')
+  else if (!(typeof depths.player === 'number' && typeof depths.ground === 'number'))
+    errors.push(`expected numeric depths; got ${JSON.stringify(depths)}`)
+  else if (depths.player <= depths.ground) errors.push(`expected player above ground; playerDepth=${depths.player} groundDepth=${depths.ground}`)
 
   // Warp zones are 64x64 at x=1280..1344, y=768..832 in both maps (see map JSON).
   await teleportPlayer(page, 1312, 800)

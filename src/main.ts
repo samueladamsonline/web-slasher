@@ -27,6 +27,10 @@ type Facing = 'down' | 'up' | 'left' | 'right'
 
 type MapKey = 'overworld' | 'cave'
 
+const DEPTH_GROUND = 0
+const DEPTH_PLAYER = 10
+const DEPTH_UI = 1000
+
 class GameScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
   private wasd!: { up: Phaser.Input.Keyboard.Key; down: Phaser.Input.Keyboard.Key; left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key }
@@ -70,6 +74,7 @@ class GameScene extends Phaser.Scene {
     // Create the player once and keep it across map loads.
     this.player = this.physics.add.sprite(0, 0, 'hero', this.frameFor(this.facing, 0))
     this.player.setOrigin(0.5, 0.8)
+    this.player.setDepth(DEPTH_PLAYER)
     this.player.setCollideWorldBounds(true)
     const body = this.player.body as Phaser.Physics.Arcade.Body
     body.setSize(28, 28)
@@ -92,6 +97,7 @@ class GameScene extends Phaser.Scene {
         backgroundColor: 'rgba(0,0,0,0.45)',
         padding: { left: 12, right: 12, top: 8, bottom: 8 },
       })
+      .setDepth(DEPTH_UI)
       .setScrollFactor(0)
   }
 
@@ -107,6 +113,7 @@ class GameScene extends Phaser.Scene {
     if (!ground) throw new Error('Failed to create Ground layer. Check layer name in Tiled JSON.')
 
     ground.setCollisionByProperty({ collides: true })
+    ground.setDepth(DEPTH_GROUND)
 
     this.map = map
     this.groundLayer = ground
@@ -121,6 +128,8 @@ class GameScene extends Phaser.Scene {
     const body = this.player.body as Phaser.Physics.Arcade.Body
     body.reset(spawnX, spawnY)
     this.player.setVelocity(0, 0)
+    this.player.setDepth(DEPTH_PLAYER)
+    this.children.bringToTop(this.player)
 
     this.groundCollider = this.physics.add.collider(this.player, ground)
 
@@ -181,7 +190,14 @@ class GameScene extends Phaser.Scene {
   }
 
   private refreshDbg() {
-    ;(window as any).__dbg = { player: this.player, mapKey: this.currentMapKey }
+    ;(window as any).__dbg = {
+      player: this.player,
+      mapKey: this.currentMapKey,
+      depths: {
+        ground: this.groundLayer?.depth ?? null,
+        player: this.player.depth,
+      },
+    }
   }
 
   private createHeroAnims() {
