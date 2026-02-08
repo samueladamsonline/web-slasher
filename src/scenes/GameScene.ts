@@ -15,6 +15,7 @@ import { HeartsUI } from '../ui/HeartsUI'
 import { DialogueUI } from '../ui/DialogueUI'
 import { InteractPromptUI } from '../ui/InteractPromptUI'
 import { MapNameUI } from '../ui/MapNameUI'
+import { MinimapUI } from '../ui/MinimapUI'
 import { OverlayUI } from '../ui/OverlayUI'
 import { WorldState } from '../game/WorldState'
 
@@ -23,6 +24,7 @@ export class GameScene extends Phaser.Scene {
   private wasd!: { up: Phaser.Input.Keyboard.Key; down: Phaser.Input.Keyboard.Key; left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key }
   private keyEsc!: Phaser.Input.Keyboard.Key
   private keyI!: Phaser.Input.Keyboard.Key
+  private keyM!: Phaser.Input.Keyboard.Key
   private keyEnter!: Phaser.Input.Keyboard.Key
   private keyN!: Phaser.Input.Keyboard.Key
   private key1!: Phaser.Input.Keyboard.Key
@@ -44,6 +46,7 @@ export class GameScene extends Phaser.Scene {
   private promptUI!: InteractPromptUI
   private interactions!: InteractionSystem
   private mapNameUI!: MapNameUI
+  private minimap!: MinimapUI
   private overlay!: OverlayUI
 
   private startMenu = true
@@ -56,7 +59,7 @@ export class GameScene extends Phaser.Scene {
   private startToken = 0
 
   private paused = false
-  private pauseMode: 'pause' | 'inventory' = 'pause'
+  private pauseMode: 'pause' | 'inventory' | 'map' = 'pause'
   private gameOver = false
   private dialoguePaused = false
   private checkpoint: { mapKey: 'overworld' | 'cave'; spawnName: string } = { mapKey: 'overworld', spawnName: 'player_spawn' }
@@ -90,6 +93,7 @@ export class GameScene extends Phaser.Scene {
     }) as { up: Phaser.Input.Keyboard.Key; down: Phaser.Input.Keyboard.Key; left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key }
     this.keyEsc = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC)
     this.keyI = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I)
+    this.keyM = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M)
     this.keyEnter = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER)
     this.keyN = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.N)
     this.key1 = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ONE)
@@ -130,6 +134,7 @@ export class GameScene extends Phaser.Scene {
         this.health?.onMapChanged?.()
         this.updateCheckpoint()
         this.mapNameUI.set(this.mapRuntime.mapKey)
+        this.minimap?.onMapChanged?.()
         this.save?.requestSave?.()
         this.refreshDbg()
       },
@@ -160,6 +165,17 @@ export class GameScene extends Phaser.Scene {
     this.mapRuntime.setInteractionSystem(this.interactions)
 
     this.enemyAI = new EnemyAISystem(this.player, () => this.mapRuntime.enemies)
+
+    this.minimap = new MinimapUI(this, this.player, {
+      getMapKey: () => this.mapRuntime.mapKey,
+      getMapSizeTiles: () => this.mapRuntime.getMapSizeTiles(),
+      isTileBlocked: (tx, ty) => this.mapRuntime.isTileBlocked(tx, ty),
+      getWarpRects: () => this.mapRuntime.getWarpTileRects(),
+      getEnemyPoints: () => {
+        const kids = this.mapRuntime.enemies?.getChildren?.() ?? []
+        return kids.filter((k: any) => k?.active).map((k: any) => ({ x: k.x, y: k.y }))
+      },
+    })
 
     // Start menu (New Game / Continue) is shown before loading a map.
     this.mapNameUI.set(null)
@@ -194,7 +210,7 @@ export class GameScene extends Phaser.Scene {
     if (this.interactions.isDialogueOpen()) return
 
     if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
-      if (this.paused && this.pauseMode === 'pause') this.setPaused(false)
+      if (this.paused) this.setPaused(false)
       else this.setPaused(true, 'pause')
       this.refreshDbg()
     }
@@ -202,6 +218,12 @@ export class GameScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.keyI)) {
       if (this.paused && this.pauseMode === 'inventory') this.setPaused(false)
       else this.setPaused(true, 'inventory')
+      this.refreshDbg()
+    }
+
+    if (Phaser.Input.Keyboard.JustDown(this.keyM)) {
+      if (this.paused && this.pauseMode === 'map') this.setPaused(false)
+      else this.setPaused(true, 'map')
       this.refreshDbg()
     }
 
@@ -217,6 +239,8 @@ export class GameScene extends Phaser.Scene {
         this.refreshDbg()
       }
     }
+
+    this.minimap?.update?.()
 
     if (this.paused) return
 
@@ -356,7 +380,7 @@ export class GameScene extends Phaser.Scene {
     if (mk && typeof sn === 'string' && sn) this.checkpoint = { mapKey: mk, spawnName: sn }
   }
 
-  private setPaused(paused: boolean, mode: 'pause' | 'inventory' = this.pauseMode) {
+  private setPaused(paused: boolean, mode: 'pause' | 'inventory' | 'map' = this.pauseMode) {
     if (this.paused === paused && this.pauseMode === mode) return
     this.paused = paused
     this.pauseMode = mode
@@ -366,9 +390,16 @@ export class GameScene extends Phaser.Scene {
       this.physics.world.pause()
       this.anims.pauseAll()
 
-      if (this.pauseMode === 'inventory') {
+      this.minimap?.setMiniVisible?.(false)
+
+      if (this.pauseMode === 'map') {
+        this.overlay.hide()
+        this.minimap?.setMapVisible?.(true)
+      } else if (this.pauseMode === 'inventory') {
+        this.minimap?.setMapVisible?.(false)
         this.overlay.showInventory(this.inventory.getInventoryLines())
       } else {
+        this.minimap?.setMapVisible?.(false)
         this.overlay.showPause(['ESC: Resume', 'I: Inventory'])
       }
     } else {
@@ -378,6 +409,8 @@ export class GameScene extends Phaser.Scene {
         this.anims.resumeAll()
       }
       this.overlay.hide()
+      this.minimap?.setMapVisible?.(false)
+      this.minimap?.setMiniVisible?.(true)
     }
   }
 
@@ -456,6 +489,8 @@ export class GameScene extends Phaser.Scene {
     this.player.setVelocity(0, 0)
     this.physics.world.pause()
     this.anims.pauseAll()
+    this.minimap?.setMiniVisible?.(false)
+    this.minimap?.setMapVisible?.(false)
 
     const lines: string[] = []
     if (this.startBusy) {
@@ -532,6 +567,8 @@ export class GameScene extends Phaser.Scene {
     this.startBusy = false
     this.startBusyMessage = null
     this.overlay.hide()
+    this.minimap?.setMapVisible?.(false)
+    this.minimap?.setMiniVisible?.(true)
 
     // Load while paused, then resume.
     this.player.setVelocity(0, 0)

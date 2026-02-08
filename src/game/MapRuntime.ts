@@ -7,6 +7,8 @@ import type { PickupSystem } from '../systems/PickupSystem'
 
 type GameObj = Phaser.GameObjects.GameObject
 
+export type WarpTileRect = { tx: number; ty: number; w: number; h: number }
+
 type MapRuntimeState = {
   mapKey: MapKey
   spawnName: string
@@ -73,6 +75,40 @@ export class MapRuntime {
 
   get groundDepth() {
     return this.state?.ground.depth ?? null
+  }
+
+  getMapSizeTiles() {
+    const map = this.state?.map
+    if (!map) return null
+    return { w: map.width, h: map.height }
+  }
+
+  isTileBlocked(tx: number, ty: number) {
+    const ground = this.state?.ground
+    if (!ground) return true
+    const tile = ground.getTileAt(Math.floor(tx), Math.floor(ty))
+    if (!tile) return true
+    return !!(tile as any).collides
+  }
+
+  getWarpTileRects(): WarpTileRect[] {
+    const out: WarpTileRect[] = []
+    for (const z of this.warpZones) {
+      const w = (z as any).width as number
+      const h = (z as any).height as number
+      const x = (z as any).x as number
+      const y = (z as any).y as number
+      if (!(typeof w === 'number' && typeof h === 'number' && typeof x === 'number' && typeof y === 'number')) continue
+
+      const left = x - w / 2
+      const top = y - h / 2
+      const tx = Math.floor(left / TILE_SIZE)
+      const ty = Math.floor(top / TILE_SIZE)
+      const tw = Math.max(1, Math.ceil(w / TILE_SIZE))
+      const th = Math.max(1, Math.ceil(h / TILE_SIZE))
+      out.push({ tx, ty, w: tw, h: th })
+    }
+    return out
   }
 
   destroy() {

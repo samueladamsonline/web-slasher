@@ -478,6 +478,33 @@ try {
     const stInv2 = await getGameState(page)
     if (stInv2?.paused) throw new Error(`expected inventory close; state=${JSON.stringify(stInv2)}`)
 
+    // Map overlay should be togglable via M (pauses physics).
+    await teleportPlayer(page, 200, 200)
+    await page.waitForTimeout(80)
+    const pMap0 = await getPlayerPos(page)
+    await page.keyboard.down('m')
+    await page.waitForTimeout(120)
+    await page.keyboard.up('m')
+    await page.waitForTimeout(100)
+    const stMap = await getGameState(page)
+    if (!stMap?.paused || stMap?.pauseMode !== 'map') throw new Error(`expected map overlay pause; state=${JSON.stringify(stMap)}`)
+    await page.keyboard.down('d')
+    await page.waitForTimeout(550)
+    await page.keyboard.up('d')
+    await page.waitForTimeout(80)
+    const pMap1 = await getPlayerPos(page)
+    if (pMap0 && pMap1) {
+      const dx = Math.abs(pMap1.x - pMap0.x)
+      const dy = Math.abs(pMap1.y - pMap0.y)
+      if (dx > 1.5 || dy > 1.5) throw new Error(`expected no movement while map overlay open; dx=${dx} dy=${dy}`)
+    }
+    await page.keyboard.down('m')
+    await page.waitForTimeout(120)
+    await page.keyboard.up('m')
+    await page.waitForTimeout(100)
+    const stMap2 = await getGameState(page)
+    if (stMap2?.paused) throw new Error(`expected map overlay close; state=${JSON.stringify(stMap2)}`)
+
     // Locked door should warp and consume a key when you have one.
     const invBeforeDoor = await getInventory(page)
     if (!(invBeforeDoor && typeof invBeforeDoor.keys === 'number')) throw new Error(`bad inventory snapshot before door: ${JSON.stringify(invBeforeDoor)}`)
@@ -618,9 +645,14 @@ try {
         const s0 = Array.isArray(enemiesNow0) ? enemiesNow0.find((e) => e.kind === 'slime') : null
         if (!s0) throw new Error(`slime not found for touch test; enemies=${JSON.stringify(enemiesNow0)}`)
 
+        // Ensure we aren't still invulnerable from earlier enemy contact tests.
+        const max = await getPlayerMaxHp(page)
+        if (typeof max === 'number') await setPlayerHp(page, max)
+        await page.waitForTimeout(650)
+
         const hp0 = await getPlayerHp(page)
         await teleportPlayer(page, typeof s0.bx === 'number' ? s0.bx : s0.x, typeof s0.by === 'number' ? s0.by : s0.y)
-        await page.waitForTimeout(250)
+        await page.waitForTimeout(320)
         const hp1 = await getPlayerHp(page)
         if (!(typeof hp0 === 'number' && typeof hp1 === 'number')) throw new Error(`hp not numeric; hp0=${hp0} hp1=${hp1}`)
         if (!(hp1 === hp0 - 1)) throw new Error(`expected hp drop by 1 on contact; hp0=${hp0} hp1=${hp1}`)
@@ -685,6 +717,9 @@ try {
     try {
       const inv0 = await getInventory(page)
       if (!(inv0 && typeof inv0.coins === 'number')) throw new Error(`bad inventory snapshot before loot: ${JSON.stringify(inv0)}`)
+      const enemiesStart = await getEnemies(page)
+      const hasSlime = Array.isArray(enemiesStart) ? enemiesStart.some((e) => e.kind === 'slime') : false
+      if (!hasSlime) throw new Error(`slime not found for loot test; enemies=${JSON.stringify(enemiesStart)}`)
       const ok = await killEnemy(page, 'slime', 10)
       if (!ok) throw new Error('failed to kill slime for loot test')
       await page.waitForTimeout(250)
@@ -713,6 +748,8 @@ try {
               const d = typeof x === 'number' && typeof y === 'number' && typeof px === 'number' && typeof py === 'number' ? Math.hypot(x - px, y - py) : null
               return { x, y, d, meta: k?.__pickup ?? null }
             }),
+            enemies: typeof globalThis.__dbg?.getEnemies === 'function' ? globalThis.__dbg.getEnemies() : null,
+            lastAttack: typeof globalThis.__dbg?.getLastAttack === 'function' ? globalThis.__dbg.getLastAttack() : null,
           }
         })
         throw new Error(`expected coin loot on enemy death; coins0=${inv0.coins} coins1=${inv1.coins}; dbg=${JSON.stringify(dbg)}`)
