@@ -56,6 +56,13 @@ export class PlayerHealthSystem {
     this.ui.set(this.maxHp, this.hp)
   }
 
+  heal(amount = 1) {
+    const n = Math.max(1, Math.floor(amount))
+    const before = this.hp
+    this.setHp(this.hp + n)
+    return this.hp !== before
+  }
+
   reset() {
     this.hp = this.maxHp
     this.invulnUntil = 0

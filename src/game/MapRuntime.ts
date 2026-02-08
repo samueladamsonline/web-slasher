@@ -2,6 +2,8 @@ import * as Phaser from 'phaser'
 import { Enemy } from '../entities/Enemy'
 import { DEPTH_GROUND, DEPTH_PLAYER, DEPTH_WARP, TILE_SIZE } from './constants'
 import type { MapKey } from './types'
+import type { InteractionSystem } from '../systems/InteractionSystem'
+import type { PickupSystem } from '../systems/PickupSystem'
 
 type GameObj = Phaser.GameObjects.GameObject
 
@@ -23,6 +25,8 @@ export class MapRuntime {
   private player: Phaser.Physics.Arcade.Sprite
   private onChanged?: () => void
   private canWarp?: () => boolean
+  private pickupSystem?: PickupSystem
+  private interactionSystem?: InteractionSystem
 
   private state?: MapRuntimeState
 
@@ -34,11 +38,25 @@ export class MapRuntime {
   private warpOverlaps: Phaser.Physics.Arcade.Collider[] = []
   private transitioning = false
 
-  constructor(scene: Phaser.Scene, player: Phaser.Physics.Arcade.Sprite, opts?: { onChanged?: () => void; canWarp?: () => boolean }) {
+  constructor(
+    scene: Phaser.Scene,
+    player: Phaser.Physics.Arcade.Sprite,
+    opts?: { onChanged?: () => void; canWarp?: () => boolean; pickupSystem?: PickupSystem; interactionSystem?: InteractionSystem },
+  ) {
     this.scene = scene
     this.player = player
     this.onChanged = opts?.onChanged
     this.canWarp = opts?.canWarp
+    this.pickupSystem = opts?.pickupSystem
+    this.interactionSystem = opts?.interactionSystem
+  }
+
+  setPickupSystem(pickupSystem: PickupSystem | undefined) {
+    this.pickupSystem = pickupSystem
+  }
+
+  setInteractionSystem(interactionSystem: InteractionSystem | undefined) {
+    this.interactionSystem = interactionSystem
   }
 
   get mapKey() {
@@ -62,7 +80,22 @@ export class MapRuntime {
   }
 
   load(mapKey: MapKey, spawnName: string) {
-    this.destroyCurrent()
+    this.loadInternal(mapKey, spawnName, { preserveTransition: false })
+  }
+
+  requestWarp(toMap: MapKey, toSpawn: string) {
+    if (this.transitioning) return
+    if (this.canWarp && !this.canWarp()) return
+    this.transitioning = true
+
+    this.scene.time.delayedCall(60, () => {
+      this.loadInternal(toMap, toSpawn, { preserveTransition: true })
+      this.scene.time.delayedCall(250, () => (this.transitioning = false))
+    })
+  }
+
+  private loadInternal(mapKey: MapKey, spawnName: string, opts: { preserveTransition: boolean }) {
+    this.destroyCurrent(opts)
 
     const map = this.scene.make.tilemap({ key: mapKey })
     const tileset = map.addTilesetImage('overworld', 'overworldTiles')
@@ -90,17 +123,23 @@ export class MapRuntime {
     this.groundCollider = this.scene.physics.add.collider(this.player, ground)
 
     const enemies = this.scene.physics.add.group()
-    this.spawnEnemiesFromObjects(map, enemies)
+    const objects = this.getObjects(map, ['Enemies', 'Objects'])
+    this.spawnEnemiesFromObjects(objects, enemies)
     this.enemyGroundCollider = this.scene.physics.add.collider(enemies, ground)
 
     this.state = { mapKey, spawnName, map, ground, enemies }
 
-    this.installWarps(map)
+    this.installWarps(objects)
+    this.pickupSystem?.install(mapKey, objects)
+    this.interactionSystem?.install(mapKey, objects, { requestWarp: (to, sp) => this.requestWarp(to, sp) })
 
     this.onChanged?.()
   }
 
-  private destroyCurrent() {
+  private destroyCurrent(opts?: { preserveTransition?: boolean }) {
+    this.pickupSystem?.clear()
+    this.interactionSystem?.clear()
+
     for (const o of this.warpOverlaps) o.destroy()
     this.warpOverlaps = []
 
@@ -125,11 +164,10 @@ export class MapRuntime {
     this.state?.map.destroy()
 
     this.state = undefined
-    this.transitioning = false
+    if (!opts?.preserveTransition) this.transitioning = false
   }
 
-  private spawnEnemiesFromObjects(map: Phaser.Tilemaps.Tilemap, group: Phaser.Physics.Arcade.Group) {
-    const objects = this.getObjects(map, ['Enemies', 'Objects'])
+  private spawnEnemiesFromObjects(objects: Phaser.Types.Tilemaps.TiledObject[], group: Phaser.Physics.Arcade.Group) {
     for (const o of objects) {
       if (o.type !== 'enemy') continue
       const enemy = Enemy.fromTiledObject(this.scene, o)
@@ -138,8 +176,7 @@ export class MapRuntime {
     }
   }
 
-  private installWarps(map: Phaser.Tilemaps.Tilemap) {
-    const objects = this.getObjects(map, ['Objects'])
+  private installWarps(objects: Phaser.Types.Tilemaps.TiledObject[]) {
     for (const o of objects) {
       if (o.type !== 'warp') continue
       if (typeof o.x !== 'number' || typeof o.y !== 'number') continue
@@ -158,14 +195,7 @@ export class MapRuntime {
       this.warpIndicators.push(...this.makeWarpIndicator(zone.x, zone.y, o.width, o.height))
 
       const overlap = this.scene.physics.add.overlap(this.player, zone, () => {
-        if (this.transitioning) return
-        if (this.canWarp && !this.canWarp()) return
-        this.transitioning = true
-
-        this.scene.time.delayedCall(60, () => {
-          this.load(toMap as MapKey, typeof toSpawn === 'string' && toSpawn ? toSpawn : 'player_spawn')
-          this.scene.time.delayedCall(250, () => (this.transitioning = false))
-        })
+        this.requestWarp(toMap as MapKey, typeof toSpawn === 'string' && toSpawn ? toSpawn : 'player_spawn')
       })
 
       this.warpOverlaps.push(overlap)

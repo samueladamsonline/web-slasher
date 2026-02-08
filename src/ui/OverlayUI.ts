@@ -60,6 +60,13 @@ export class OverlayUI {
     this.layout()
   }
 
+  showInventory(lines: string[]) {
+    this.title.setText('INVENTORY')
+    this.body.setText(lines.join('\n'))
+    this.container.setVisible(true)
+    this.layout()
+  }
+
   showGameOver(lines: string[]) {
     this.title.setText('GAME OVER')
     this.body.setText(lines.join('\n'))

@@ -99,6 +99,18 @@ async function setPlayerHp(page, hp) {
   await page.evaluate(({ hp }) => globalThis.__dbg?.setPlayerHp?.(hp), { hp })
 }
 
+async function getInventory(page) {
+  return await page.evaluate(() => (typeof globalThis.__dbg?.getInventory === 'function' ? globalThis.__dbg.getInventory() : null))
+}
+
+async function getDialogue(page) {
+  return await page.evaluate(() => (typeof globalThis.__dbg?.getDialogue === 'function' ? globalThis.__dbg.getDialogue() : null))
+}
+
+async function tryInteract(page) {
+  await page.evaluate(() => globalThis.__dbg?.tryInteract?.())
+}
+
 async function pushIntoEnemyAndMeasureDrift(page, enemyKind, enemyX, enemyY) {
   // Freeze the enemy so any measured drift is due to player pushing, not AI wander.
   await page.evaluate(({ kind }) => {
@@ -321,6 +333,91 @@ try {
   const initialMapKey = await getMapKey(page)
   if (initialMapKey !== 'overworld') errors.push(`expected initial mapKey=overworld; got ${initialMapKey}`)
 
+  // Systems sanity: pickups + inventory + interactables.
+  try {
+    const inv0 = await getInventory(page)
+    if (!(inv0 && typeof inv0.coins === 'number' && typeof inv0.keys === 'number')) throw new Error(`bad inventory snapshot: ${JSON.stringify(inv0)}`)
+
+    // Locked door should not warp without a key.
+    await teleportPlayer(page, 480, 352)
+    await page.waitForTimeout(120)
+    await tryInteract(page)
+    await page.waitForTimeout(80)
+    const dlg0 = await getDialogue(page)
+    if (!dlg0?.open) throw new Error(`expected dialogue open when interacting with locked door; dlg=${JSON.stringify(dlg0)}`)
+    if (!String(dlg0.text ?? '').toLowerCase().includes('locked')) throw new Error(`expected locked-door dialogue; dlg=${JSON.stringify(dlg0)}`)
+    await tryInteract(page) // close
+    await page.waitForTimeout(80)
+    const dlg0b = await getDialogue(page)
+    if (dlg0b?.open) throw new Error(`expected dialogue to close; dlg=${JSON.stringify(dlg0b)}`)
+    const mk0 = await getMapKey(page)
+    if (mk0 !== 'overworld') throw new Error(`expected to remain in overworld without key; mapKey=${mk0}`)
+
+    // Chest should grant 1 key.
+    await teleportPlayer(page, 352, 416)
+    await page.waitForTimeout(120)
+    await tryInteract(page)
+    await page.waitForTimeout(80)
+    const inv1 = await getInventory(page)
+    if (!(inv1 && typeof inv1.keys === 'number')) throw new Error(`bad inventory snapshot after chest: ${JSON.stringify(inv1)}`)
+    if (inv1.keys !== inv0.keys + 1) throw new Error(`expected +1 key after chest; keys0=${inv0.keys} keys1=${inv1.keys}`)
+    const dlg1 = await getDialogue(page)
+    if (!dlg1?.open) throw new Error(`expected dialogue open after chest; dlg=${JSON.stringify(dlg1)}`)
+    await tryInteract(page) // close
+    await page.waitForTimeout(60)
+
+    // Coin pickup should increase coin count.
+    await teleportPlayer(page, 224, 352)
+    await page.waitForTimeout(220)
+    const inv2 = await getInventory(page)
+    if (!(inv2 && typeof inv2.coins === 'number')) throw new Error(`bad inventory snapshot after coin: ${JSON.stringify(inv2)}`)
+    if (inv2.coins !== inv0.coins + 1) throw new Error(`expected +1 coin from pickup; coins0=${inv0.coins} coins2=${inv2.coins}`)
+
+    // Heart pickup should heal (only consumed if you are missing hp).
+    const max = await getPlayerMaxHp(page)
+    if (typeof max === 'number') await setPlayerHp(page, Math.max(0, max - 1))
+    await page.waitForTimeout(60)
+    await teleportPlayer(page, 288, 416)
+    await page.waitForTimeout(220)
+    const hp1 = await getPlayerHp(page)
+    const max2 = await getPlayerMaxHp(page)
+    if (!(typeof hp1 === 'number' && typeof max2 === 'number')) throw new Error(`hp/max not numeric after heart; hp=${hp1} max=${max2}`)
+    if (hp1 !== max2) throw new Error(`expected heart pickup to heal to max; hp=${hp1} max=${max2}`)
+
+    // Inventory overlay should be togglable via I (pauses physics).
+    await page.keyboard.down('i')
+    await page.waitForTimeout(120)
+    await page.keyboard.up('i')
+    await page.waitForTimeout(80)
+    const stInv = await getGameState(page)
+    if (!stInv?.paused || stInv?.pauseMode !== 'inventory') throw new Error(`expected inventory pause; state=${JSON.stringify(stInv)}`)
+    await page.keyboard.down('i')
+    await page.waitForTimeout(120)
+    await page.keyboard.up('i')
+    await page.waitForTimeout(80)
+    const stInv2 = await getGameState(page)
+    if (stInv2?.paused) throw new Error(`expected inventory close; state=${JSON.stringify(stInv2)}`)
+
+    // Locked door should warp and consume a key when you have one.
+    const invBeforeDoor = await getInventory(page)
+    if (!(invBeforeDoor && typeof invBeforeDoor.keys === 'number')) throw new Error(`bad inventory snapshot before door: ${JSON.stringify(invBeforeDoor)}`)
+    await teleportPlayer(page, 480, 352)
+    await page.waitForTimeout(120)
+    await tryInteract(page)
+    await page.waitForTimeout(200)
+    await waitForMapKey(page, 'cave', 3000)
+    const invAfterDoor = await getInventory(page)
+    if (!(invAfterDoor && typeof invAfterDoor.keys === 'number')) throw new Error(`bad inventory snapshot after door: ${JSON.stringify(invAfterDoor)}`)
+    if (invAfterDoor.keys !== invBeforeDoor.keys - 1) throw new Error(`expected key consumption on locked warp; before=${invBeforeDoor.keys} after=${invAfterDoor.keys}`)
+
+    // Return to overworld so the remaining warp tests are deterministic.
+    await teleportPlayer(page, 1312, 800)
+    await page.waitForTimeout(220)
+    await waitForMapKey(page, 'overworld', 3000)
+  } catch (e) {
+    errors.push(`expected pickups/inventory/interactables; ${String(e?.message ?? e)}`)
+  }
+
   // Pause sanity: while paused, movement should not change position.
   try {
     await teleportPlayer(page, 200, 200)
@@ -497,6 +594,18 @@ try {
     await page.waitForTimeout(450)
   } catch {
     // ignore; these are only for test stability
+  }
+
+  // Ensure we're starting from overworld (some earlier tests may warp).
+  try {
+    const mk = await getMapKey(page)
+    if (mk !== 'overworld') {
+      await teleportPlayer(page, 1312, 800)
+      await page.waitForTimeout(200)
+      await waitForMapKey(page, 'overworld', 3000)
+    }
+  } catch (e) {
+    errors.push(`expected to stabilize to overworld; ${String(e?.message ?? e)}`)
   }
 
   await teleportPlayer(page, 1312, 800)

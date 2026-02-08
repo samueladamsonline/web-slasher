@@ -2,13 +2,7 @@ import * as Phaser from 'phaser'
 import type { EnemyDef, EnemyKind } from '../content/enemies'
 import { ENEMIES } from '../content/enemies'
 import { DEPTH_ENEMY } from '../game/constants'
-
-type TiledProps = any[]
-
-function getProp(props: TiledProps | undefined, name: string): unknown {
-  if (!Array.isArray(props)) return undefined
-  return props.find((p) => p?.name === name)?.value
-}
+import { getTiledNumber, getTiledProp, type TiledProps } from '../game/tiled'
 
 type EnemyStats = Pick<EnemyDef, 'invulnMs' | 'knockback' | 'moveSpeed' | 'leashRadius' | 'touchDamage' | 'touchKnockback' | 'aggroRadius'>
 
@@ -134,30 +128,30 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     if (typeof obj.x !== 'number' || typeof obj.y !== 'number') return null
     const props = (obj.properties ?? []) as TiledProps
 
-    const kindRaw = getProp(props, 'kind')
+    const kindRaw = getTiledProp(props, 'kind')
     const kind =
       typeof kindRaw === 'string' && kindRaw in ENEMIES ? (kindRaw as EnemyKind) : ('slime' as EnemyKind)
 
     const def = ENEMIES[kind]
-    const hpRaw = getProp(props, 'hp')
+    const hpRaw = getTiledNumber(props, 'hp')
     const hp = typeof hpRaw === 'number' ? hpRaw : undefined
 
     const enemy = new Enemy(scene, obj.x, obj.y, def, hp)
 
     // Optional overrides from Tiled (kept minimal; defaults live in content/enemies.ts).
-    const speedRaw = getProp(props, 'speed')
+    const speedRaw = getTiledNumber(props, 'speed')
     if (typeof speedRaw === 'number') enemy.stats.moveSpeed = Math.max(0, speedRaw)
-    const aggroRaw = getProp(props, 'aggroRadius')
+    const aggroRaw = getTiledNumber(props, 'aggroRadius')
     if (typeof aggroRaw === 'number') enemy.stats.aggroRadius = Math.max(0, aggroRaw)
-    const leashRaw = getProp(props, 'leashRadius')
+    const leashRaw = getTiledNumber(props, 'leashRadius')
     if (typeof leashRaw === 'number') enemy.stats.leashRadius = Math.max(0, leashRaw)
-    const touchDmgRaw = getProp(props, 'touchDamage')
+    const touchDmgRaw = getTiledNumber(props, 'touchDamage')
     if (typeof touchDmgRaw === 'number') enemy.stats.touchDamage = Math.max(0, Math.floor(touchDmgRaw))
-    const touchKbRaw = getProp(props, 'touchKnockback')
+    const touchKbRaw = getTiledNumber(props, 'touchKnockback')
     if (typeof touchKbRaw === 'number') enemy.stats.touchKnockback = Math.max(0, touchKbRaw)
-    const invulnRaw = getProp(props, 'invulnMs')
+    const invulnRaw = getTiledNumber(props, 'invulnMs')
     if (typeof invulnRaw === 'number') enemy.stats.invulnMs = Math.max(0, invulnRaw)
-    const kbRaw = getProp(props, 'knockback')
+    const kbRaw = getTiledNumber(props, 'knockback')
     if (typeof kbRaw === 'number') enemy.stats.knockback = Math.max(0, kbRaw)
 
     return enemy

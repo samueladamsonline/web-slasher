@@ -74,6 +74,7 @@ export class CombatSystem {
   private player: Phaser.Physics.Arcade.Sprite
   private getFacing: () => Facing
   private getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined
+  private canAttack?: () => boolean
   private debugHitbox: boolean
 
   private attackLock = false
@@ -83,12 +84,18 @@ export class CombatSystem {
   constructor(
     scene: Phaser.Scene,
     player: Phaser.Physics.Arcade.Sprite,
-    opts: { getFacing: () => Facing; getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined; debugHitbox?: boolean },
+    opts: {
+      getFacing: () => Facing
+      getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined
+      canAttack?: () => boolean
+      debugHitbox?: boolean
+    },
   ) {
     this.scene = scene
     this.player = player
     this.getFacing = opts.getFacing
     this.getEnemyGroup = opts.getEnemyGroup
+    this.canAttack = opts.canAttack
     this.debugHitbox = !!opts.debugHitbox
   }
 
@@ -110,6 +117,7 @@ export class CombatSystem {
   }
 
   tryAttack() {
+    if (this.canAttack && !this.canAttack()) return
     if (this.attackLock) return
     const enemies = this.getEnemyGroup()
     if (!enemies) return

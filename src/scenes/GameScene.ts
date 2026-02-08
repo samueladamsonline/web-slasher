@@ -5,10 +5,16 @@ import { DEPTH_PLAYER, HERO_H, HERO_W } from '../game/constants'
 import type { Facing } from '../game/types'
 import { Enemy } from '../entities/Enemy'
 import { EnemyAISystem } from '../systems/EnemyAISystem'
+import { InteractionSystem } from '../systems/InteractionSystem'
+import { InventorySystem } from '../systems/InventorySystem'
+import { PickupSystem } from '../systems/PickupSystem'
 import { PlayerHealthSystem } from '../systems/PlayerHealthSystem'
 import { HeartsUI } from '../ui/HeartsUI'
+import { DialogueUI } from '../ui/DialogueUI'
+import { InteractPromptUI } from '../ui/InteractPromptUI'
 import { MapNameUI } from '../ui/MapNameUI'
 import { OverlayUI } from '../ui/OverlayUI'
+import { WorldState } from '../game/WorldState'
 
 export class GameScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
@@ -25,11 +31,19 @@ export class GameScene extends Phaser.Scene {
   private combat!: CombatSystem
   private enemyAI!: EnemyAISystem
   private health!: PlayerHealthSystem
+  private world!: WorldState
+  private inventory!: InventorySystem
+  private pickups!: PickupSystem
+  private dialogueUI!: DialogueUI
+  private promptUI!: InteractPromptUI
+  private interactions!: InteractionSystem
   private mapNameUI!: MapNameUI
   private overlay!: OverlayUI
 
   private paused = false
+  private pauseMode: 'pause' | 'inventory' = 'pause'
   private gameOver = false
+  private dialoguePaused = false
   private checkpoint: { mapKey: string; spawnName: string } = { mapKey: 'overworld', spawnName: 'player_spawn' }
 
   constructor() {
@@ -46,6 +60,8 @@ export class GameScene extends Phaser.Scene {
 
     CombatSystem.preload(this)
     HeartsUI.preload(this)
+    PickupSystem.preload(this)
+    InteractionSystem.preload(this)
   }
 
   create() {
@@ -76,6 +92,11 @@ export class GameScene extends Phaser.Scene {
 
     this.mapNameUI = new MapNameUI(this)
     this.overlay = new OverlayUI(this)
+    this.dialogueUI = new DialogueUI(this)
+    this.promptUI = new InteractPromptUI(this)
+
+    this.world = new WorldState()
+    this.inventory = new InventorySystem()
 
     this.mapRuntime = new MapRuntime(this, this.player, {
       onChanged: () => {
@@ -90,12 +111,23 @@ export class GameScene extends Phaser.Scene {
     this.combat = new CombatSystem(this, this.player, {
       getFacing: () => this.facing,
       getEnemyGroup: () => this.mapRuntime.enemies,
+      canAttack: () => this.inventory.getWeapon() !== null,
       debugHitbox,
     })
     this.combat.bindInput(keyboard)
 
     this.health = new PlayerHealthSystem(this, this.player, () => this.mapRuntime.enemies)
     this.health.onMapChanged()
+
+    this.pickups = new PickupSystem(this, this.player, { inventory: this.inventory, health: this.health, world: this.world })
+    this.interactions = new InteractionSystem(
+      this,
+      this.player,
+      { inventory: this.inventory, world: this.world, dialogue: this.dialogueUI, prompt: this.promptUI },
+      { onDialogueOpen: () => this.pauseForDialogue(), onDialogueClose: () => this.resumeFromDialogue() },
+    )
+    this.mapRuntime.setPickupSystem(this.pickups)
+    this.mapRuntime.setInteractionSystem(this.interactions)
 
     this.enemyAI = new EnemyAISystem(this.player, () => this.mapRuntime.enemies)
 
@@ -107,14 +139,24 @@ export class GameScene extends Phaser.Scene {
   }
 
   update() {
-    if (!this.gameOver && (Phaser.Input.Keyboard.JustDown(this.keyEsc) || Phaser.Input.Keyboard.JustDown(this.keyI))) {
-      this.setPaused(!this.paused)
-      this.refreshDbg()
-    }
-
     if (this.gameOver) {
       if (Phaser.Input.Keyboard.JustDown(this.keyEnter)) this.respawn()
       return
+    }
+
+    if (!this.paused) this.interactions.update()
+    if (this.interactions.isDialogueOpen()) return
+
+    if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
+      if (this.paused && this.pauseMode === 'pause') this.setPaused(false)
+      else this.setPaused(true, 'pause')
+      this.refreshDbg()
+    }
+
+    if (Phaser.Input.Keyboard.JustDown(this.keyI)) {
+      if (this.paused && this.pauseMode === 'inventory') this.setPaused(false)
+      else this.setPaused(true, 'inventory')
+      this.refreshDbg()
     }
 
     if (this.paused) return
@@ -200,9 +242,12 @@ export class GameScene extends Phaser.Scene {
       facing: this.facing,
       getLastAttack: () => this.combat?.getDebug?.() ?? { at: 0, hits: 0 },
       tryAttack: () => this.combat?.tryAttack?.(),
+      tryInteract: () => this.interactions?.tryInteract?.(),
       getPlayerHp: () => this.health?.getHp?.() ?? null,
       getPlayerMaxHp: () => this.health?.getMaxHp?.() ?? null,
       setPlayerHp: (hp: number) => this.health?.setHp?.(hp),
+      getInventory: () => this.inventory?.snapshot?.() ?? null,
+      getDialogue: () => ({ open: this.interactions?.isDialogueOpen?.() ?? false, text: this.interactions?.getDialogueText?.() ?? '' }),
       enemyCount: rawEnemies.length,
       enemyActives: rawEnemies.map((e: any) => e?.active ?? null),
       getEnemies: () => {
@@ -218,8 +263,14 @@ export class GameScene extends Phaser.Scene {
               : { kind: null, x: e.x, y: e.y, bx, by, hp: null }
           })
       },
-      getGameState: () => ({ paused: this.paused, gameOver: this.gameOver, checkpoint: { ...this.checkpoint } }),
-      togglePause: () => this.setPaused(!this.paused),
+      getGameState: () => ({
+        paused: this.paused,
+        pauseMode: this.pauseMode,
+        gameOver: this.gameOver,
+        dialogueOpen: this.interactions?.isDialogueOpen?.() ?? false,
+        checkpoint: { ...this.checkpoint },
+      }),
+      togglePause: () => (this.paused ? this.setPaused(false) : this.setPaused(true, 'pause')),
       respawn: () => this.respawn(),
       depths: {
         ground: this.mapRuntime.groundDepth,
@@ -234,26 +285,56 @@ export class GameScene extends Phaser.Scene {
     if (typeof mk === 'string' && mk && typeof sn === 'string' && sn) this.checkpoint = { mapKey: mk, spawnName: sn }
   }
 
-  private setPaused(paused: boolean) {
-    if (this.paused === paused) return
+  private setPaused(paused: boolean, mode: 'pause' | 'inventory' = this.pauseMode) {
+    if (this.paused === paused && this.pauseMode === mode) return
     this.paused = paused
+    this.pauseMode = mode
 
     if (this.paused) {
       this.player.setVelocity(0, 0)
       this.physics.world.pause()
       this.anims.pauseAll()
-      this.overlay.showPause(['ESC or I: Resume', '', 'Inventory (stub)', '- Sword: Basic', '- Keys: 0'])
+
+      if (this.pauseMode === 'inventory') {
+        this.overlay.showInventory(this.inventory.getInventoryLines())
+      } else {
+        this.overlay.showPause(['ESC: Resume', 'I: Inventory'])
+      }
     } else {
-      this.physics.world.resume()
-      this.anims.resumeAll()
+      // Dialogue may have paused the world separately.
+      if (!this.dialoguePaused) {
+        this.physics.world.resume()
+        this.anims.resumeAll()
+      }
       this.overlay.hide()
     }
+  }
+
+  private pauseForDialogue() {
+    if (this.dialoguePaused) return
+    if (this.paused) return
+    if (this.gameOver) return
+    this.dialoguePaused = true
+    this.player.setVelocity(0, 0)
+    this.physics.world.pause()
+    this.anims.pauseAll()
+  }
+
+  private resumeFromDialogue() {
+    if (!this.dialoguePaused) return
+    this.dialoguePaused = false
+    if (this.paused) return
+    if (this.gameOver) return
+    this.physics.world.resume()
+    this.anims.resumeAll()
   }
 
   private triggerGameOver() {
     if (this.gameOver) return
     this.gameOver = true
     this.paused = false
+    this.pauseMode = 'pause'
+    this.dialoguePaused = false
 
     this.player.setVelocity(0, 0)
     this.physics.world.pause()

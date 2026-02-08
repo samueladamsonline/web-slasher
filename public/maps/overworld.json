@@ -4,7 +4,7 @@
   "width": 25,
   "infinite": false,
   "nextlayerid": 4,
-  "nextobjectid": 8,
+  "nextobjectid": 13,
   "orientation": "orthogonal",
   "renderorder": "right-down",
   "tiledversion": "1.10.2",
@@ -517,6 +517,116 @@
             }
           ],
           "id": 7
+        },
+        {
+          "id": 8,
+          "name": "coin_1",
+          "type": "pickup",
+          "x": 224,
+          "y": 352,
+          "width": 0,
+          "height": 0,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "itemId",
+              "type": "string",
+              "value": "coin"
+            },
+            {
+              "name": "amount",
+              "type": "int",
+              "value": 1
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "name": "heart_1",
+          "type": "pickup",
+          "x": 288,
+          "y": 416,
+          "width": 0,
+          "height": 0,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "itemId",
+              "type": "string",
+              "value": "heart"
+            },
+            {
+              "name": "amount",
+              "type": "int",
+              "value": 1
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "name": "sign_welcome",
+          "type": "sign",
+          "x": 416,
+          "y": 352,
+          "width": 0,
+          "height": 0,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Welcome.\n\nE: Interact\nSpace: Attack\nI: Inventory"
+            }
+          ]
+        },
+        {
+          "id": 11,
+          "name": "chest_key_1",
+          "type": "chest",
+          "x": 352,
+          "y": 416,
+          "width": 0,
+          "height": 0,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "itemId",
+              "type": "string",
+              "value": "key"
+            },
+            {
+              "name": "amount",
+              "type": "int",
+              "value": 1
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "name": "locked_warp_to_cave",
+          "type": "lockedWarp",
+          "x": 480,
+          "y": 352,
+          "width": 0,
+          "height": 0,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "toMap",
+              "type": "string",
+              "value": "cave"
+            },
+            {
+              "name": "toSpawn",
+              "type": "string",
+              "value": "from_overworld_fast"
+            }
+          ]
         }
       ]
     },
