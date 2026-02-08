@@ -9,7 +9,6 @@
     "preview": "vite preview",
     "gen:sprites": "node scripts/gen-hero-spritesheet.mjs",
     "gen:enemy-sprites": "node scripts/gen-enemy-spritesheets.mjs",
-    "gen:kenney-hero": "node scripts/gen-kenney-hero.mjs",
     "gen:tileset": "node scripts/gen-tileset.mjs",
     "smoke": "node scripts/smoke.mjs",
     "playtest": "node scripts/playtest.mjs"
