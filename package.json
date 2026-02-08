@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "gen:sprites": "node scripts/gen-hero-spritesheet.mjs",
+    "gen:tileset": "node scripts/gen-tileset.mjs",
     "smoke": "node scripts/smoke.mjs",
     "playtest": "node scripts/playtest.mjs"
   },

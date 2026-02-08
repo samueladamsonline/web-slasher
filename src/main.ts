@@ -19,8 +19,6 @@ function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
 }
 
-const WORLD_WIDTH = 1600
-const WORLD_HEIGHT = 1000
 const TILE_SIZE = 64
 const HERO_W = 48
 const HERO_H = 72
@@ -39,7 +37,7 @@ class GameScene extends Phaser.Scene {
   }
 
   preload() {
-    // Generate simple HD-style textures at runtime (placeholder art).
+    // Generate simple HD-style textures at runtime (placeholder tile art).
     const g = this.add.graphics()
 
     g.fillStyle(0x2f8f2f, 1)
@@ -62,6 +60,10 @@ class GameScene extends Phaser.Scene {
     // Real sprite pipeline: load a spritesheet from /public.
     // Layout: 3 columns (walk frames), 4 rows (down, up, left, right).
     this.load.spritesheet('hero', '/sprites/hero.png', { frameWidth: HERO_W, frameHeight: HERO_H })
+
+    // Tilemap pipeline (Tiled JSON + tileset image in /public).
+    this.load.image('overworldTiles', '/tilesets/overworld.png')
+    this.load.tilemapTiledJSON('overworld', '/maps/overworld.json')
   }
 
   create() {
@@ -74,48 +76,33 @@ class GameScene extends Phaser.Scene {
       right: Phaser.Input.Keyboard.KeyCodes.D,
     }) as { up: Phaser.Input.Keyboard.Key; down: Phaser.Input.Keyboard.Key; left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key }
 
+    const map = this.make.tilemap({ key: 'overworld' })
+    const tileset = map.addTilesetImage('overworld', 'overworldTiles')
+    if (!tileset) throw new Error('Failed to create tileset. Check tileset name in Tiled JSON.')
+
+    const ground = map.createLayer('Ground', tileset, 0, 0)
+    if (!ground) throw new Error('Failed to create Ground layer. Check layer name in Tiled JSON.')
+
+    // Rock tiles in the tileset are marked with `collides: true` in the Tiled JSON.
+    ground.setCollisionByProperty({ collides: true })
+
     // Important: Arcade Physics world bounds default to the canvas size.
-    // Our map is larger, so set bounds to avoid "invisible walls" at ~960x600.
-    this.physics.world.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT)
-    this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT)
+    // Set bounds to map size to avoid invisible walls.
+    this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
+    this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
 
-    const tiles = this.physics.add.staticGroup()
-    const rocks = this.physics.add.staticGroup()
+    const spawn = map.findObject('Objects', (o) => o.name === 'player_spawn')
+    const spawnX = spawn?.x ?? TILE_SIZE * 5 + TILE_SIZE / 2
+    const spawnY = spawn?.y ?? TILE_SIZE * 5 + TILE_SIZE / 2
 
-    for (let y = 0; y < WORLD_HEIGHT; y += TILE_SIZE) {
-      for (let x = 0; x < WORLD_WIDTH; x += TILE_SIZE) {
-        const isDirt = (x / TILE_SIZE + y / TILE_SIZE) % 7 === 0
-        tiles.create(x + TILE_SIZE / 2, y + TILE_SIZE / 2, isDirt ? 'tile-dirt' : 'tile-grass')
-      }
-    }
-
-    const obstacleCoords = [
-      [5, 4],
-      [6, 4],
-      [7, 4],
-      [8, 4],
-      [12, 7],
-      [12, 8],
-      [2, 10],
-      [3, 10],
-      [4, 10],
-      [9, 2],
-      [10, 2],
-      [11, 2],
-    ]
-
-    for (const [gx, gy] of obstacleCoords) {
-      rocks.create(gx * TILE_SIZE + TILE_SIZE / 2, gy * TILE_SIZE + TILE_SIZE / 2, 'tile-rock')
-    }
-
-    this.player = this.physics.add.sprite(320, 320, 'hero', this.frameFor(this.facing, 0))
+    this.player = this.physics.add.sprite(spawnX, spawnY, 'hero', this.frameFor(this.facing, 0))
     this.player.setOrigin(0.5, 0.8)
     this.player.setCollideWorldBounds(true)
     const body = this.player.body as Phaser.Physics.Arcade.Body
     body.setSize(28, 28)
     body.setOffset((HERO_W - 28) / 2, HERO_H - 28 - 8)
 
-    this.physics.add.collider(this.player, rocks)
+    this.physics.add.collider(this.player, ground)
 
     this.cameras.main.startFollow(this.player, true, 0.12, 0.12)
 
