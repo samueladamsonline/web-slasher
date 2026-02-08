@@ -151,6 +151,14 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     if (typeof aggroRaw === 'number') enemy.stats.aggroRadius = Math.max(0, aggroRaw)
     const leashRaw = getProp(props, 'leashRadius')
     if (typeof leashRaw === 'number') enemy.stats.leashRadius = Math.max(0, leashRaw)
+    const touchDmgRaw = getProp(props, 'touchDamage')
+    if (typeof touchDmgRaw === 'number') enemy.stats.touchDamage = Math.max(0, Math.floor(touchDmgRaw))
+    const touchKbRaw = getProp(props, 'touchKnockback')
+    if (typeof touchKbRaw === 'number') enemy.stats.touchKnockback = Math.max(0, touchKbRaw)
+    const invulnRaw = getProp(props, 'invulnMs')
+    if (typeof invulnRaw === 'number') enemy.stats.invulnMs = Math.max(0, invulnRaw)
+    const kbRaw = getProp(props, 'knockback')
+    if (typeof kbRaw === 'number') enemy.stats.knockback = Math.max(0, kbRaw)
 
     return enemy
   }

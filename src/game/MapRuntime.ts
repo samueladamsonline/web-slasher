@@ -12,6 +12,11 @@ type MapRuntimeState = {
   enemies: Phaser.Physics.Arcade.Group
 }
 
+type TiledObjectGroup = {
+  name?: string
+  objects?: Phaser.Types.Tilemaps.TiledObject[]
+}
+
 export class MapRuntime {
   private scene: Phaser.Scene
   private player: Phaser.Physics.Arcade.Sprite
@@ -67,7 +72,7 @@ export class MapRuntime {
     this.scene.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
     this.scene.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
 
-    const spawn = map.findObject('Objects', (o) => o.name === spawnName)
+    const spawn = this.findObject(map, (o) => o.type === 'spawn' && o.name === spawnName)
     const spawnX = spawn?.x ?? TILE_SIZE * 5 + TILE_SIZE / 2
     const spawnY = spawn?.y ?? TILE_SIZE * 5 + TILE_SIZE / 2
 
@@ -119,9 +124,7 @@ export class MapRuntime {
   }
 
   private spawnEnemiesFromObjects(map: Phaser.Tilemaps.Tilemap, group: Phaser.Physics.Arcade.Group) {
-    const layer = map.getObjectLayer('Objects')
-    const objects = layer?.objects ?? []
-
+    const objects = this.getObjects(map, ['Enemies', 'Objects'])
     for (const o of objects) {
       if (o.type !== 'enemy') continue
       const enemy = Enemy.fromTiledObject(this.scene, o)
@@ -131,9 +134,7 @@ export class MapRuntime {
   }
 
   private installWarps(map: Phaser.Tilemaps.Tilemap) {
-    const layer = map.getObjectLayer('Objects')
-    const objects = layer?.objects ?? []
-
+    const objects = this.getObjects(map, ['Objects'])
     for (const o of objects) {
       if (o.type !== 'warp') continue
       if (typeof o.x !== 'number' || typeof o.y !== 'number') continue
@@ -164,6 +165,36 @@ export class MapRuntime {
 
       this.warpOverlaps.push(overlap)
     }
+  }
+
+  private getObjects(map: Phaser.Tilemaps.Tilemap, preferredLayerOrder: string[] | null) {
+    const allLayers = ((map as any).objects ?? []) as TiledObjectGroup[]
+    const byName = new Map<string, TiledObjectGroup>()
+    for (const l of allLayers) if (l?.name) byName.set(l.name, l)
+
+    if (Array.isArray(preferredLayerOrder) && preferredLayerOrder.length) {
+      const out: Phaser.Types.Tilemaps.TiledObject[] = []
+      const used = new Set<string>()
+      for (const name of preferredLayerOrder) {
+        const layer = byName.get(name)
+        if (!layer) continue
+        used.add(name)
+        out.push(...(layer.objects ?? []))
+      }
+      // Include other object layers afterwards to make the loader resilient.
+      for (const l of allLayers) {
+        if (!l?.name || used.has(l.name)) continue
+        out.push(...(l.objects ?? []))
+      }
+      return out
+    }
+
+    return allLayers.flatMap((l) => l.objects ?? [])
+  }
+
+  private findObject(map: Phaser.Tilemaps.Tilemap, pred: (o: Phaser.Types.Tilemaps.TiledObject) => boolean) {
+    const objs = this.getObjects(map, null)
+    return objs.find(pred)
   }
 
   private makeWarpIndicator(x: number, y: number, w: number, h: number) {

@@ -48,6 +48,24 @@ export class CombatSystem {
     g.lineTo(56, 18)
     g.strokePath()
     g.generateTexture('slash', 64, 64)
+    g.clear()
+
+    // Hit spark.
+    g.lineStyle(4, 0xffffff, 0.9)
+    g.fillStyle(0xfff2a8, 0.95)
+    g.beginPath()
+    g.moveTo(16, 2)
+    g.lineTo(20, 12)
+    g.lineTo(30, 16)
+    g.lineTo(20, 20)
+    g.lineTo(16, 30)
+    g.lineTo(12, 20)
+    g.lineTo(2, 16)
+    g.lineTo(12, 12)
+    g.closePath()
+    g.fillPath()
+    g.strokePath()
+    g.generateTexture('hitSpark', 32, 32)
 
     g.destroy()
   }
@@ -56,6 +74,7 @@ export class CombatSystem {
   private player: Phaser.Physics.Arcade.Sprite
   private getFacing: () => Facing
   private getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined
+  private debugHitbox: boolean
 
   private attackLock = false
   private lastAttack: CombatDebug = { at: 0, hits: 0 }
@@ -64,12 +83,13 @@ export class CombatSystem {
   constructor(
     scene: Phaser.Scene,
     player: Phaser.Physics.Arcade.Sprite,
-    opts: { getFacing: () => Facing; getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined },
+    opts: { getFacing: () => Facing; getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined; debugHitbox?: boolean },
   ) {
     this.scene = scene
     this.player = player
     this.getFacing = opts.getFacing
     this.getEnemyGroup = opts.getEnemyGroup
+    this.debugHitbox = !!opts.debugHitbox
   }
 
   bindInput(keyboard: Phaser.Input.Keyboard.KeyboardPlugin) {
@@ -117,13 +137,46 @@ export class CombatSystem {
       const go = (b as any)?.gameObject as Phaser.GameObjects.GameObject | undefined
       if (!go || !go.active) continue
       if (!(go instanceof Enemy)) continue
-      if (go.damage(this.scene.time.now, this.player.x, this.player.y, 1)) this.lastAttack.hits++
+      if (go.damage(this.scene.time.now, this.player.x, this.player.y, 1)) {
+        this.lastAttack.hits++
+        this.spawnHitSpark(go.x, go.y)
+      }
     }
+
+    if (this.debugHitbox) this.showHitboxDebug(hx, hy, sizeW, sizeH)
 
     this.playSwordVfx(hx, hy, facing)
 
+    if (this.lastAttack.hits > 0) this.scene.cameras.main.shake(70, 0.003)
+
     this.scene.time.delayedCall(220, () => {
       this.attackLock = false
+    })
+  }
+
+  private spawnHitSpark(x: number, y: number) {
+    const s = this.scene.add.image(x, y - 10, 'hitSpark').setDepth(DEPTH_HITBOX).setAlpha(0.95)
+    s.setBlendMode(Phaser.BlendModes.ADD)
+    s.setScale(0.9)
+    this.scene.tweens.add({
+      targets: s,
+      alpha: { from: 0.95, to: 0 },
+      scale: { from: 0.9, to: 1.35 },
+      angle: { from: -10, to: 25 },
+      duration: 140,
+      ease: 'sine.out',
+      onComplete: () => s.destroy(),
+    })
+  }
+
+  private showHitboxDebug(cx: number, cy: number, w: number, h: number) {
+    const r = this.scene.add.rectangle(cx, cy, w, h, 0xffe08a, 0.08).setStrokeStyle(2, 0xffe08a, 0.75).setDepth(DEPTH_HITBOX)
+    this.scene.tweens.add({
+      targets: r,
+      alpha: { from: 0.6, to: 0 },
+      duration: 120,
+      ease: 'sine.out',
+      onComplete: () => r.destroy(),
     })
   }
 

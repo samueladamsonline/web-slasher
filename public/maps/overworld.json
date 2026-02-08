@@ -3,7 +3,7 @@
   "height": 16,
   "width": 25,
   "infinite": false,
-  "nextlayerid": 3,
+  "nextlayerid": 4,
   "nextobjectid": 8,
   "orientation": "orthogonal",
   "renderorder": "right-down",
@@ -484,6 +484,53 @@
           ]
         },
         {
+          "name": "from_cave_fast",
+          "type": "spawn",
+          "x": 224,
+          "y": 416,
+          "width": 0,
+          "height": 0,
+          "rotation": 0,
+          "visible": true,
+          "point": true,
+          "id": 6
+        },
+        {
+          "name": "warp_to_cave_fast",
+          "type": "warp",
+          "x": 256,
+          "y": 320,
+          "width": 64,
+          "height": 64,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "toMap",
+              "type": "string",
+              "value": "cave"
+            },
+            {
+              "name": "toSpawn",
+              "type": "string",
+              "value": "from_overworld_fast"
+            }
+          ],
+          "id": 7
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Enemies",
+      "type": "objectgroup",
+      "draworder": "topdown",
+      "opacity": 1,
+      "visible": true,
+      "x": 0,
+      "y": 0,
+      "objects": [
+        {
           "id": 4,
           "name": "slime_1",
           "type": "enemy",
@@ -545,41 +592,6 @@
               "value": 320
             }
           ]
-        },
-        {
-          "name": "from_cave_fast",
-          "type": "spawn",
-          "x": 224,
-          "y": 416,
-          "width": 0,
-          "height": 0,
-          "rotation": 0,
-          "visible": true,
-          "point": true,
-          "id": 6
-        },
-        {
-          "name": "warp_to_cave_fast",
-          "type": "warp",
-          "x": 256,
-          "y": 320,
-          "width": 64,
-          "height": 64,
-          "rotation": 0,
-          "visible": true,
-          "properties": [
-            {
-              "name": "toMap",
-              "type": "string",
-              "value": "cave"
-            },
-            {
-              "name": "toSpawn",
-              "type": "string",
-              "value": "from_overworld_fast"
-            }
-          ],
-          "id": 7
         }
       ]
     }

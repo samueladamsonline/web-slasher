@@ -451,6 +451,32 @@ try {
     errors.push(`expected warp to cave; ${String(e?.message ?? e)}`)
   }
 
+  // Cave should have enemies too (tilemap-driven content).
+  const caveEnemies0 = await getEnemies(page)
+  if (!Array.isArray(caveEnemies0) || caveEnemies0.length < 2) errors.push(`expected cave enemies; got ${JSON.stringify(caveEnemies0)}`)
+  else {
+    const hasSlime = caveEnemies0.some((e) => e.kind === 'slime')
+    const hasBat = caveEnemies0.some((e) => e.kind === 'bat')
+    if (!hasSlime || !hasBat) errors.push(`expected slime+bat in cave; got ${JSON.stringify(caveEnemies0)}`)
+  }
+
+  // Cave bat has touchDamage=2 override (see cave.json).
+  try {
+    const enemiesNow = await getEnemies(page)
+    const bat = Array.isArray(enemiesNow) ? enemiesNow.find((e) => e.kind === 'bat') : null
+    if (!bat) throw new Error('bat not found in cave for touchDamage override')
+    const hp0 = await getPlayerHp(page)
+    if (typeof hp0 !== 'number') throw new Error(`hp0 not numeric; hp0=${hp0}`)
+    await teleportPlayer(page, typeof bat.bx === 'number' ? bat.bx : bat.x, typeof bat.by === 'number' ? bat.by : bat.y)
+    await page.waitForTimeout(260)
+    const hp1 = await getPlayerHp(page)
+    if (typeof hp1 !== 'number') throw new Error(`hp1 not numeric; hp1=${hp1}`)
+    const expected = Math.max(0, hp0 - 2)
+    if (hp1 !== expected) throw new Error(`expected bat touchDamage=2; hp0=${hp0} hp1=${hp1} expected=${expected}`)
+  } catch (e) {
+    errors.push(`expected touchDamage override; ${String(e?.message ?? e)}`)
+  }
+
   await teleportPlayer(page, 1312, 800)
   await page.waitForTimeout(200)
   try {

@@ -105,6 +105,7 @@ export class PlayerHealthSystem {
 
     // Feedback + knockback.
     this.player.setTintFill(0xffffff)
+    this.scene.cameras.main.shake(70, 0.002)
     this.scene.time.delayedCall(90, () => {
       if (!this.player.active) return
       this.player.clearTint()

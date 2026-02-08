@@ -3,8 +3,8 @@
   "height": 16,
   "width": 25,
   "infinite": false,
-  "nextlayerid": 3,
-  "nextobjectid": 6,
+  "nextlayerid": 4,
+  "nextobjectid": 8,
   "orientation": "orthogonal",
   "renderorder": "right-down",
   "tiledversion": "1.10.2",
@@ -517,6 +517,91 @@
             }
           ],
           "id": 5
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Enemies",
+      "type": "objectgroup",
+      "draworder": "topdown",
+      "opacity": 1,
+      "visible": true,
+      "x": 0,
+      "y": 0,
+      "objects": [
+        {
+          "id": 6,
+          "name": "slime_cave_1",
+          "type": "enemy",
+          "x": 576,
+          "y": 416,
+          "width": 0,
+          "height": 0,
+          "rotation": 0,
+          "visible": true,
+          "point": true,
+          "properties": [
+            {
+              "name": "kind",
+              "type": "string",
+              "value": "slime"
+            },
+            {
+              "name": "hp",
+              "type": "int",
+              "value": 3
+            },
+            {
+              "name": "speed",
+              "type": "float",
+              "value": 50
+            },
+            {
+              "name": "leashRadius",
+              "type": "float",
+              "value": 120
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "name": "bat_cave_1",
+          "type": "enemy",
+          "x": 704,
+          "y": 352,
+          "width": 0,
+          "height": 0,
+          "rotation": 0,
+          "visible": true,
+          "point": true,
+          "properties": [
+            {
+              "name": "kind",
+              "type": "string",
+              "value": "bat"
+            },
+            {
+              "name": "hp",
+              "type": "int",
+              "value": 2
+            },
+            {
+              "name": "speed",
+              "type": "float",
+              "value": 145
+            },
+            {
+              "name": "aggroRadius",
+              "type": "float",
+              "value": 320
+            },
+            {
+              "name": "touchDamage",
+              "type": "int",
+              "value": 2
+            }
+          ]
         }
       ]
     }

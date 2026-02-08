@@ -67,9 +67,11 @@ export class GameScene extends Phaser.Scene {
       },
       canWarp: () => (typeof this.health?.canWarp === 'function' ? this.health.canWarp() : true),
     })
+    const debugHitbox = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('debugHitbox')
     this.combat = new CombatSystem(this, this.player, {
       getFacing: () => this.facing,
       getEnemyGroup: () => this.mapRuntime.enemies,
+      debugHitbox,
     })
     this.combat.bindInput(keyboard)
 
