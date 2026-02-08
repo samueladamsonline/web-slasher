@@ -37,7 +37,6 @@ const DEPTH_UI = 1000
 class GameScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
   private wasd!: { up: Phaser.Input.Keyboard.Key; down: Phaser.Input.Keyboard.Key; left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key }
-  private attackKey!: Phaser.Input.Keyboard.Key
   private player!: Phaser.Physics.Arcade.Sprite
   private speed = 240
   private facing: Facing = 'down'
@@ -55,6 +54,7 @@ class GameScene extends Phaser.Scene {
   private attackHitboxes: Phaser.GameObjects.GameObject[] = []
   private transitioning = false
   private attackLock = false
+  private lastAttack = { at: 0, hits: 0 }
 
   constructor() {
     super('game')
@@ -70,7 +70,7 @@ class GameScene extends Phaser.Scene {
     this.load.tilemapTiledJSON('overworld', '/maps/overworld.json')
     this.load.tilemapTiledJSON('cave', '/maps/cave.json')
 
-    // Enemy placeholder texture.
+    // Enemy + VFX placeholder textures.
     const g = this.add.graphics()
     g.fillStyle(0x42d36d, 1)
     g.fillRoundedRect(0, 0, 44, 34, 16)
@@ -82,6 +82,22 @@ class GameScene extends Phaser.Scene {
     g.lineStyle(3, 0x0a0d12, 0.65)
     g.strokeRoundedRect(0, 0, 44, 34, 16)
     g.generateTexture('slime', 44, 34)
+    g.clear()
+
+    // Sword slash swish (64x64).
+    g.lineStyle(12, 0xfff2a8, 0.85)
+    g.beginPath()
+    g.moveTo(12, 50)
+    g.lineTo(52, 14)
+    g.strokePath()
+
+    g.lineStyle(6, 0xffffff, 0.55)
+    g.beginPath()
+    g.moveTo(18, 48)
+    g.lineTo(54, 18)
+    g.strokePath()
+
+    g.generateTexture('slash', 64, 64)
     g.destroy()
   }
 
@@ -94,7 +110,8 @@ class GameScene extends Phaser.Scene {
       down: Phaser.Input.Keyboard.KeyCodes.S,
       right: Phaser.Input.Keyboard.KeyCodes.D,
     }) as { up: Phaser.Input.Keyboard.Key; down: Phaser.Input.Keyboard.Key; left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key }
-    this.attackKey = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
+    keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
+    keyboard.on('keydown-SPACE', () => this.tryAttack())
 
     // Create the player once and keep it across map loads.
     this.player = this.physics.add.sprite(0, 0, 'hero', this.frameFor(this.facing, 0))
@@ -350,6 +367,8 @@ class GameScene extends Phaser.Scene {
           .filter((e: any) => e?.active)
           .map((e: any) => ({ x: e.x, y: e.y, hp: e.getData?.('hp') ?? null }))
       },
+      lastAttack: this.lastAttack,
+      facing: this.facing,
       depths: {
         ground: this.groundLayer?.depth ?? null,
         player: this.player.depth,
@@ -401,9 +420,7 @@ class GameScene extends Phaser.Scene {
       this.player.setFrame(this.frameFor(this.facing, 0))
     }
 
-    if (Phaser.Input.Keyboard.JustDown(this.attackKey)) {
-      this.tryAttack()
-    }
+    // Attack is handled via a keydown listener (see create()).
   }
 
   private tryAttack() {
@@ -411,6 +428,7 @@ class GameScene extends Phaser.Scene {
     if (!this.enemies) return
 
     this.attackLock = true
+    this.lastAttack = { at: this.time.now, hits: 0 }
 
     const offset = 42
     const sizeW = 50
@@ -423,26 +441,42 @@ class GameScene extends Phaser.Scene {
     if (this.facing === 'left') hx -= offset
     if (this.facing === 'right') hx += offset
 
-    const hit = this.add.rectangle(hx, hy, sizeW, sizeH, 0xfff2a8, 0.12).setDepth(DEPTH_HITBOX)
-    this.physics.add.existing(hit)
-    const body = hit.body as Phaser.Physics.Arcade.Body
-    body.setAllowGravity(false)
-    body.setImmovable(true)
+    // Hit detection: use ArcadePhysics.overlapRect against world bodies. This avoids
+    // creating short-lived physics bodies (and is reliable across Phaser versions).
+    const left = hx - sizeW / 2
+    const top = hy - sizeH / 2
+    const bodies = this.physics.overlapRect(left, top, sizeW, sizeH, true, false) as Phaser.Physics.Arcade.Body[]
+    for (const b of bodies) {
+      const go = (b as any)?.gameObject as Phaser.GameObjects.GameObject | undefined
+      if (!go || !go.active) continue
+      if (go === this.player) continue
+      const hasHp = (go as any).getData && (go as any).getData('hp') != null
+      if (!hasHp) continue
+      this.lastAttack.hits++
+      this.damageEnemy(go as Phaser.Physics.Arcade.Sprite)
+    }
 
-    this.attackHitboxes.push(hit)
+    const slash = this.add.image(hx, hy, 'slash').setDepth(DEPTH_HITBOX).setAlpha(0.95)
+    slash.setBlendMode(Phaser.BlendModes.ADD)
 
-    const hitThisAttack = new Set<Phaser.GameObjects.GameObject>()
-    const overlap = this.physics.add.overlap(hit, this.enemies, (_hb, e) => {
-      if (!e || !(e as any).active) return
-      if (hitThisAttack.has(e as any)) return
-      hitThisAttack.add(e as any)
-      this.damageEnemy(e as Phaser.Physics.Arcade.Sprite)
+    const rotByFacing: Record<Facing, number> = {
+      right: 0,
+      down: Math.PI / 2,
+      left: Math.PI,
+      up: -Math.PI / 2,
+    }
+    slash.setRotation(rotByFacing[this.facing])
+    slash.setScale(0.8)
+
+    this.tweens.add({
+      targets: slash,
+      alpha: { from: 0.95, to: 0 },
+      scale: { from: 0.8, to: 1.15 },
+      duration: 140,
+      ease: 'sine.out',
+      onComplete: () => slash.destroy(),
     })
-
-    this.time.delayedCall(110, () => {
-      overlap.destroy()
-      hit.destroy()
-    })
+    this.refreshDbg()
 
     this.time.delayedCall(220, () => {
       this.attackLock = false
@@ -460,17 +494,31 @@ class GameScene extends Phaser.Scene {
     enemy.setData('invulnUntil', now + 250)
 
     enemy.setTintFill(0xffffff)
-    this.time.delayedCall(70, () => enemy.clearTint())
+    this.time.delayedCall(70, () => {
+      if (!enemy.active) return
+      enemy.clearTint()
+    })
 
     // Knockback.
     const dx = enemy.x - this.player.x
     const dy = enemy.y - this.player.y
     const v = new Phaser.Math.Vector2(dx, dy).normalize().scale(220)
-    enemy.setVelocity(v.x, v.y)
-    this.time.delayedCall(120, () => enemy.setVelocity(0, 0))
+    if (enemy.body) enemy.setVelocity(v.x, v.y)
+    this.time.delayedCall(120, () => {
+      if (!enemy.active) return
+      if (!enemy.body) return
+      enemy.setVelocity(0, 0)
+    })
 
     if (nextHp <= 0) {
-      this.time.delayedCall(60, () => enemy.destroy())
+      // Disable immediately so follow-up timers / overlaps don't interact with a dead enemy.
+      const b = enemy.body as Phaser.Physics.Arcade.Body | undefined
+      if (b) b.enable = false
+      enemy.setVisible(false)
+      this.time.delayedCall(60, () => {
+        if (!enemy.scene) return
+        enemy.destroy()
+      })
     }
   }
 }
