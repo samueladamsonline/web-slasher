@@ -1,7 +1,7 @@
 import * as Phaser from 'phaser'
 import { Enemy } from '../entities/Enemy'
-import { DEPTH_HITBOX } from './constants'
-import type { Facing } from './types'
+import { DEPTH_HITBOX } from '../game/constants'
+import type { Facing } from '../game/types'
 
 export type CombatDebug = { at: number; hits: number }
 

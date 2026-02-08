@@ -1,4 +1,5 @@
 import * as Phaser from 'phaser'
+import { INTERACTABLES, type InteractableDefId, type InteractableKind } from '../content/interactables'
 import type { ItemId } from '../content/items'
 import { ITEMS } from '../content/items'
 import { DEPTH_PROP } from '../game/constants'
@@ -8,8 +9,6 @@ import type { WorldState } from '../game/WorldState'
 import type { InventorySystem } from './InventorySystem'
 import type { DialogueUI } from '../ui/DialogueUI'
 import type { InteractPromptUI } from '../ui/InteractPromptUI'
-
-type InteractableKind = 'sign' | 'npc' | 'chest' | 'lockedWarp'
 
 type Interactable = {
   mapKey: MapKey
@@ -23,6 +22,7 @@ type Interactable = {
   rewardAmount?: number
   toMap?: MapKey
   toSpawn?: string
+  keyCost?: number
   display?: Phaser.GameObjects.GameObject
 }
 
@@ -183,8 +183,14 @@ export class InteractionSystem {
     const out: Interactable[] = []
 
     for (const o of objects) {
-      const kind = o.type as InteractableKind
-      if (!(kind === 'sign' || kind === 'npc' || kind === 'chest' || kind === 'lockedWarp')) continue
+      const defIdRaw = getTiledString(o.properties, 'defId')
+      const defId = defIdRaw && defIdRaw in INTERACTABLES ? (defIdRaw as InteractableDefId) : null
+      const def = defId ? INTERACTABLES[defId] : null
+
+      const kindRaw = (def?.kind ?? o.type) as InteractableKind
+      const kind: InteractableKind | null =
+        kindRaw === 'sign' || kindRaw === 'npc' || kindRaw === 'chest' || kindRaw === 'lockedWarp' ? kindRaw : null
+      if (!kind) continue
 
       const objectId = typeof o.id === 'number' ? o.id : null
       if (!objectId) continue
@@ -199,26 +205,33 @@ export class InteractionSystem {
       const y = h > 0 ? y0 + h / 2 : y0
 
       const radiusRaw = getTiledNumber(o.properties, 'radius')
-      const radius = typeof radiusRaw === 'number' ? Math.max(20, radiusRaw) : 78
+      const radius = typeof radiusRaw === 'number' ? Math.max(20, radiusRaw) : typeof def?.radius === 'number' ? Math.max(20, def.radius) : 78
 
       const base: Interactable = { mapKey, objectId, kind, x, y, radius }
 
       if (kind === 'sign' || kind === 'npc') {
-        base.message = getTiledString(o.properties, 'message') ?? '...'
+        base.message = getTiledString(o.properties, 'message') ?? def?.message ?? '...'
       }
 
       if (kind === 'chest') {
         const rewardRaw = getTiledString(o.properties, 'itemId')
-        const rewardItemId = rewardRaw && rewardRaw in ITEMS ? (rewardRaw as ItemId) : undefined
+        const rewardItemId =
+          rewardRaw && rewardRaw in ITEMS ? (rewardRaw as ItemId) : def?.reward?.itemId && def.reward.itemId in ITEMS ? def.reward.itemId : undefined
         base.rewardItemId = rewardItemId
-        base.rewardAmount = Math.max(1, Math.floor(getTiledNumber(o.properties, 'amount') ?? 1))
+        base.rewardAmount = Math.max(1, Math.floor(getTiledNumber(o.properties, 'amount') ?? def?.reward?.amount ?? 1))
       }
 
       if (kind === 'lockedWarp') {
         const toMap = getTiledString(o.properties, 'toMap')
-        const toSpawn = getTiledString(o.properties, 'toSpawn') ?? 'player_spawn'
-        base.toMap = toMap === 'overworld' || toMap === 'cave' ? toMap : undefined
-        base.toSpawn = toSpawn
+        const toSpawn = getTiledString(o.properties, 'toSpawn')
+        const defToMap = def?.lockedWarp?.toMap
+        const defToSpawn = def?.lockedWarp?.toSpawn
+        const defKeyCost = def?.lockedWarp?.keyCost
+
+        const finalToMap = (toMap === 'overworld' || toMap === 'cave' ? toMap : undefined) ?? defToMap
+        base.toMap = finalToMap
+        base.toSpawn = toSpawn ?? defToSpawn ?? 'player_spawn'
+        base.keyCost = Math.max(0, Math.floor(getTiledNumber(o.properties, 'keyCost') ?? defKeyCost ?? 1))
       }
 
       // Visuals
@@ -316,9 +329,12 @@ export class InteractionSystem {
         return
       }
 
-      if (!this.inventory.tryConsumeKey(1)) {
-        this.openDialogue('Locked. You need a key.')
-        return
+      const keyCost = Math.max(0, Math.floor(i.keyCost ?? 1))
+      if (keyCost > 0) {
+        if (!this.inventory.tryConsumeKey(keyCost)) {
+          this.openDialogue(keyCost === 1 ? 'Locked. You need a key.' : `Locked. You need ${keyCost} keys.`)
+          return
+        }
       }
 
       // Warp immediately; no dialogue so we don't leave the world paused.
@@ -338,4 +354,3 @@ export class InteractionSystem {
     this.onDialogueClose?.()
   }
 }
-

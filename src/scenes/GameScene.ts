@@ -1,5 +1,4 @@
 import * as Phaser from 'phaser'
-import { CombatSystem } from '../game/CombatSystem'
 import { MapRuntime } from '../game/MapRuntime'
 import { DEPTH_PLAYER, HERO_H, HERO_W } from '../game/constants'
 import type { Facing } from '../game/types'
@@ -7,8 +6,10 @@ import { Enemy } from '../entities/Enemy'
 import { EnemyAISystem } from '../systems/EnemyAISystem'
 import { InteractionSystem } from '../systems/InteractionSystem'
 import { InventorySystem } from '../systems/InventorySystem'
+import { LootSystem } from '../systems/LootSystem'
 import { PickupSystem } from '../systems/PickupSystem'
 import { PlayerHealthSystem } from '../systems/PlayerHealthSystem'
+import { CombatSystem } from '../systems/CombatSystem'
 import { HeartsUI } from '../ui/HeartsUI'
 import { DialogueUI } from '../ui/DialogueUI'
 import { InteractPromptUI } from '../ui/InteractPromptUI'
@@ -120,6 +121,8 @@ export class GameScene extends Phaser.Scene {
     this.health.onMapChanged()
 
     this.pickups = new PickupSystem(this, this.player, { inventory: this.inventory, health: this.health, world: this.world })
+    // LootSystem listens for enemy death events and spawns drops via PickupSystem.
+    new LootSystem(this, this.pickups)
     this.interactions = new InteractionSystem(
       this,
       this.player,
@@ -183,6 +186,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.health.update()
+    this.pickups.update()
     if (this.health.getHp() <= 0) {
       this.triggerGameOver()
       this.refreshDbg()

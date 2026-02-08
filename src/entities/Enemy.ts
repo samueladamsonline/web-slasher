@@ -1,6 +1,6 @@
 import * as Phaser from 'phaser'
-import type { EnemyDef, EnemyKind } from '../content/enemies'
-import { ENEMIES } from '../content/enemies'
+import type { EnemyDef, EnemyKind } from './enemies'
+import { ENEMIES } from './enemies'
 import { DEPTH_ENEMY } from '../game/constants'
 import { getTiledNumber, getTiledProp, type TiledProps } from '../game/tiled'
 
@@ -115,6 +115,9 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
   }
 
   private die() {
+    // Let other systems (loot, quests, etc.) react before this enemy is destroyed.
+    this.scene.events.emit('enemy:died', { kind: this.kind, x: this.x, y: this.y })
+
     const body = this.body as Phaser.Physics.Arcade.Body | undefined
     if (body) body.enable = false
     this.setVisible(false)
@@ -138,7 +141,7 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
 
     const enemy = new Enemy(scene, obj.x, obj.y, def, hp)
 
-    // Optional overrides from Tiled (kept minimal; defaults live in content/enemies.ts).
+    // Optional overrides from Tiled (kept minimal; defaults live in entities/enemies.ts).
     const speedRaw = getTiledNumber(props, 'speed')
     if (typeof speedRaw === 'number') enemy.stats.moveSpeed = Math.max(0, speedRaw)
     const aggroRaw = getTiledNumber(props, 'aggroRadius')

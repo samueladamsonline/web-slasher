@@ -10,7 +10,8 @@ import type { PlayerHealthSystem } from './PlayerHealthSystem'
 
 type PickupData = {
   mapKey: MapKey
-  objectId: number
+  objectId?: number
+  persisted: boolean
   itemId: ItemId
   amount: number
 }
@@ -78,8 +79,10 @@ export class PickupSystem {
   private health: PlayerHealthSystem
   private world: WorldState
 
+  private mapKey: MapKey | null = null
   private group?: Phaser.Physics.Arcade.Group
   private overlap?: Phaser.Physics.Arcade.Collider
+  private autoPickupRadius = 64
 
   constructor(
     scene: Phaser.Scene,
@@ -94,6 +97,7 @@ export class PickupSystem {
   }
 
   clear() {
+    this.mapKey = null
     this.overlap?.destroy()
     this.overlap = undefined
     this.group?.clear(true, true)
@@ -103,6 +107,7 @@ export class PickupSystem {
 
   install(mapKey: MapKey, objects: Phaser.Types.Tilemaps.TiledObject[]) {
     this.clear()
+    this.mapKey = mapKey
 
     const group = this.scene.physics.add.group()
     this.group = group
@@ -124,12 +129,7 @@ export class PickupSystem {
       const y = typeof o.y === 'number' ? o.y : null
       if (!(typeof x === 'number' && typeof y === 'number')) continue
 
-      const s = this.scene.physics.add.sprite(x, y, ITEMS[itemId].texture)
-      s.setDepth(DEPTH_PICKUP)
-      s.setOrigin(0.5, 0.85)
-      s.setImmovable(true)
-      ;(s.body as Phaser.Physics.Arcade.Body).setSize(22, 18, true)
-      ;(s as any).__pickup = { mapKey, objectId, itemId, amount } satisfies PickupData
+      const s = this.spawnSprite(group, x, y, itemId, amount, { mapKey, objectId, persisted: true })
 
       // A little idle float so pickups read as interactive.
       this.scene.tweens.add({
@@ -140,23 +140,76 @@ export class PickupSystem {
         repeat: -1,
         ease: 'sine.inOut',
       })
-
-      group.add(s)
     }
 
     this.overlap = this.scene.physics.add.overlap(this.player, group, (_p, pickupGo) => {
       const s = pickupGo as Phaser.Physics.Arcade.Sprite
-      const data = (s as any).__pickup as PickupData | undefined
-      if (!data) return
-      if (!s.active) return
-
-      const consumed = this.applyPickup(data.itemId, data.amount)
-      if (!consumed) return
-
-      this.world.markPickupCollected(data.mapKey, data.objectId)
-      this.scene.tweens.killTweensOf(s)
-      s.destroy()
+      this.tryCollect(s)
     })
+  }
+
+  spawnDrop(x: number, y: number, itemId: ItemId, amount: number) {
+    if (!this.group) {
+      // If called before install, create a group so drops still work.
+      this.group = this.scene.physics.add.group()
+    }
+    const mapKey = this.mapKey
+    if (!mapKey) return
+
+    const s = this.spawnSprite(this.group, x, y, itemId, amount, { mapKey, persisted: false })
+
+    // Tiny pop so drops read as "new".
+    s.setScale(0.85)
+    this.scene.tweens.add({ targets: s, scale: { from: 0.85, to: 1 }, duration: 120, ease: 'sine.out' })
+  }
+
+  update() {
+    if (!this.group) return
+    const mapKey = this.mapKey
+    if (!mapKey) return
+
+    const r2 = this.autoPickupRadius * this.autoPickupRadius
+    const kids = this.group.getChildren() as unknown as Phaser.GameObjects.GameObject[]
+    for (const go of kids) {
+      if (!(go instanceof Phaser.Physics.Arcade.Sprite)) continue
+      if (!go.active) continue
+      const dx = go.x - this.player.x
+      const dy = go.y - this.player.y
+      if (dx * dx + dy * dy <= r2) this.tryCollect(go)
+    }
+  }
+
+  private spawnSprite(
+    group: Phaser.Physics.Arcade.Group,
+    x: number,
+    y: number,
+    itemId: ItemId,
+    amount: number,
+    meta: { mapKey: MapKey; objectId?: number; persisted: boolean },
+  ) {
+    const s = this.scene.physics.add.sprite(x, y, ITEMS[itemId].texture)
+    s.setDepth(DEPTH_PICKUP)
+    s.setOrigin(0.5, 0.85)
+    s.setImmovable(true)
+    ;(s.body as Phaser.Physics.Arcade.Body).setSize(22, 18, true)
+    ;(s as any).__pickup = { ...meta, itemId, amount } satisfies PickupData
+    group.add(s)
+    return s
+  }
+
+  private tryCollect(s: Phaser.Physics.Arcade.Sprite) {
+    const data = (s as any).__pickup as PickupData | undefined
+    if (!data) return
+    if (!s.active) return
+
+    const consumed = this.applyPickup(data.itemId, data.amount)
+    if (!consumed) return
+
+    if (data.persisted && typeof data.objectId === 'number') {
+      this.world.markPickupCollected(data.mapKey, data.objectId)
+    }
+    this.scene.tweens.killTweensOf(s)
+    s.destroy()
   }
 
   private applyPickup(itemId: ItemId, amount: number) {
@@ -172,4 +225,3 @@ export class PickupSystem {
     return false
   }
 }
-

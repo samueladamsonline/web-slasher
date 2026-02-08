@@ -576,9 +576,9 @@
           "visible": true,
           "properties": [
             {
-              "name": "message",
+              "name": "defId",
               "type": "string",
-              "value": "Welcome.\n\nE: Interact\nSpace: Attack\nI: Inventory"
+              "value": "welcome_sign"
             }
           ]
         },
@@ -594,14 +594,9 @@
           "visible": true,
           "properties": [
             {
-              "name": "itemId",
+              "name": "defId",
               "type": "string",
-              "value": "key"
-            },
-            {
-              "name": "amount",
-              "type": "int",
-              "value": 1
+              "value": "starter_key_chest"
             }
           ]
         },
@@ -617,14 +612,9 @@
           "visible": true,
           "properties": [
             {
-              "name": "toMap",
+              "name": "defId",
               "type": "string",
-              "value": "cave"
-            },
-            {
-              "name": "toSpawn",
-              "type": "string",
-              "value": "from_overworld_fast"
+              "value": "locked_door_to_cave"
             }
           ]
         }

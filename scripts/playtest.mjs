@@ -210,6 +210,64 @@ async function slashEnemyAndGetHpDelta(page, kind) {
   return { hp0, hp1, before, after, atk0, atk1 }
 }
 
+async function killEnemy(page, kind, maxSwings = 10) {
+  // Freeze the target so the kill is deterministic.
+  await page.evaluate(({ kind }) => {
+    const scene = globalThis.__dbg?.player?.scene
+    const group = scene?.mapRuntime?.enemies
+    const kids = group?.getChildren?.() ?? []
+    const target = kids.find((e) => e?.kind === kind)
+    if (!target) return
+    target.__testPrevSpeed = target.stats?.moveSpeed
+    if (target.stats) target.stats.moveSpeed = 0
+    if (typeof target.setVelocity === 'function') target.setVelocity(0, 0)
+  }, { kind })
+
+  let killed = false
+  for (let i = 0; i < maxSwings; i++) {
+    const enemies = await getEnemies(page)
+    const e = Array.isArray(enemies) ? enemies.find((x) => x.kind === kind) : null
+    if (!e) {
+      killed = true
+      break
+    }
+
+    const tx = typeof e.bx === 'number' ? e.bx : e.x
+    const ty = typeof e.by === 'number' ? e.by : e.y
+
+    await teleportPlayer(page, tx - 42, ty)
+    await page.waitForTimeout(80)
+    await page.evaluate(() => {
+      const scene = globalThis.__dbg?.player?.scene
+      const p = globalThis.__dbg?.player
+      if (!scene || !p) return
+      scene.facing = 'right'
+      if (typeof p.setVelocity === 'function') p.setVelocity(0, 0)
+    })
+    await page.waitForTimeout(40)
+    await page.evaluate(() => globalThis.__dbg?.tryAttack?.())
+    // Give enough time for attack lock + enemy invuln.
+    await page.waitForTimeout(330)
+  }
+
+  await page.evaluate(({ kind }) => {
+    const scene = globalThis.__dbg?.player?.scene
+    const group = scene?.mapRuntime?.enemies
+    const kids = group?.getChildren?.() ?? []
+    const target = kids.find((e) => e?.kind === kind)
+    if (!target) return
+    const prev = target.__testPrevSpeed
+    if (typeof prev === 'number' && target.stats) target.stats.moveSpeed = prev
+    delete target.__testPrevSpeed
+  }, { kind })
+
+  if (killed) return true
+
+  const enemiesEnd = await getEnemies(page)
+  const stillThere = Array.isArray(enemiesEnd) ? enemiesEnd.some((x) => x.kind === kind) : false
+  return !stillThere
+}
+
 async function waitForEnemyMove(page, kind, minDist, timeoutMs = 2500) {
   const start = Date.now()
   const enemies0 = await getEnemies(page)
@@ -352,6 +410,17 @@ try {
     if (dlg0b?.open) throw new Error(`expected dialogue to close; dlg=${JSON.stringify(dlg0b)}`)
     const mk0 = await getMapKey(page)
     if (mk0 !== 'overworld') throw new Error(`expected to remain in overworld without key; mapKey=${mk0}`)
+
+    // Sign should display a message (data-driven via defId).
+    await teleportPlayer(page, 416, 352)
+    await page.waitForTimeout(120)
+    await tryInteract(page)
+    await page.waitForTimeout(80)
+    const dlgSign = await getDialogue(page)
+    if (!dlgSign?.open) throw new Error(`expected dialogue open for sign; dlg=${JSON.stringify(dlgSign)}`)
+    if (!String(dlgSign.text ?? '').toLowerCase().includes('welcome')) throw new Error(`expected welcome text for sign; dlg=${JSON.stringify(dlgSign)}`)
+    await tryInteract(page) // close
+    await page.waitForTimeout(60)
 
     // Chest should grant 1 key.
     await teleportPlayer(page, 352, 416)
@@ -557,6 +626,20 @@ try {
       }
     }
 
+    // Loot sanity: killing an enemy should drop coins that auto-collect.
+    try {
+      const inv0 = await getInventory(page)
+      if (!(inv0 && typeof inv0.coins === 'number')) throw new Error(`bad inventory snapshot before loot: ${JSON.stringify(inv0)}`)
+      const ok = await killEnemy(page, 'slime', 10)
+      if (!ok) throw new Error('failed to kill slime for loot test')
+      await page.waitForTimeout(250)
+      const inv1 = await getInventory(page)
+      if (!(inv1 && typeof inv1.coins === 'number')) throw new Error(`bad inventory snapshot after loot: ${JSON.stringify(inv1)}`)
+      if (inv1.coins < inv0.coins + 1) throw new Error(`expected coin loot on enemy death; coins0=${inv0.coins} coins1=${inv1.coins}`)
+    } catch (e) {
+      errors.push(`expected loot drops; ${String(e?.message ?? e)}`)
+    }
+
     if (bat) {
       const { hp0, hp1, before, after, atk0, atk1 } = await slashEnemyAndGetHpDelta(page, 'bat')
       if (!(typeof hp0 === 'number')) errors.push(`expected numeric bat hp; before=${JSON.stringify(before)} after=${JSON.stringify(after)}`)
@@ -569,6 +652,8 @@ try {
     }
 
     // Exercise death + delayed timers (spam attacks).
+    await teleportPlayer(page, 100, 100)
+    await page.waitForTimeout(80)
     for (let i = 0; i < 5; i++) {
       await page.evaluate(() => {
         globalThis.__dbg?.tryAttack?.()
