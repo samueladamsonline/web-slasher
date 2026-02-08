@@ -4,6 +4,8 @@ import { Enemy } from '../entities/Enemy'
 export class EnemyAISystem {
   private player: Phaser.Physics.Arcade.Sprite
   private getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined
+  private batRetreatUntil = new WeakMap<Enemy, number>()
+  private batRetreatCooldownUntil = new WeakMap<Enemy, number>()
 
   constructor(player: Phaser.Physics.Arcade.Sprite, getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined) {
     this.player = player
@@ -83,6 +85,26 @@ export class EnemyAISystem {
     const dx = this.player.x - enemy.x
     const dy = this.player.y - enemy.y
     const dist = Math.hypot(dx, dy)
+
+    // On contact, bats should back off briefly, then re-aggro.
+    // This prevents sticky "slowdown" behavior when physics is constantly resolving contact.
+    const touchDist = 44
+    if (dist < touchDist) {
+      const cd = this.batRetreatCooldownUntil.get(enemy) ?? 0
+      if (now >= cd) {
+        this.batRetreatUntil.set(enemy, now + 340)
+        this.batRetreatCooldownUntil.set(enemy, now + 650)
+      }
+    }
+
+    const retreatUntil = this.batRetreatUntil.get(enemy) ?? 0
+    if (now < retreatUntil) {
+      const v = new Phaser.Math.Vector2(-dx, -dy)
+      if (v.lengthSq() < 0.0001) v.set(1, 0)
+      v.normalize().scale(speed * 1.1)
+      enemy.setVelocity(v.x, v.y)
+      return
+    }
 
     if (dist < aggro) {
       const v = new Phaser.Math.Vector2(dx, dy)

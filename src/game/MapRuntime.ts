@@ -22,7 +22,6 @@ export class MapRuntime {
 
   private groundCollider?: Phaser.Physics.Arcade.Collider
   private enemyGroundCollider?: Phaser.Physics.Arcade.Collider
-  private enemyPlayerCollider?: Phaser.Physics.Arcade.Collider
 
   private warpZones: Phaser.GameObjects.Zone[] = []
   private warpIndicators: GameObj[] = []
@@ -83,7 +82,6 @@ export class MapRuntime {
     const enemies = this.scene.physics.add.group()
     this.spawnEnemiesFromObjects(map, enemies)
     this.enemyGroundCollider = this.scene.physics.add.collider(enemies, ground)
-    this.enemyPlayerCollider = this.scene.physics.add.collider(this.player, enemies)
 
     this.state = { mapKey, map, ground, enemies }
 
@@ -107,8 +105,6 @@ export class MapRuntime {
 
     this.enemyGroundCollider?.destroy()
     this.enemyGroundCollider = undefined
-    this.enemyPlayerCollider?.destroy()
-    this.enemyPlayerCollider = undefined
     this.state?.enemies.clear(true, true)
     this.state?.enemies.destroy()
 

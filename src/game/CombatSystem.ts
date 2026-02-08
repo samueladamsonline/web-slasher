@@ -7,37 +7,8 @@ export type CombatDebug = { at: number; hits: number }
 
 export class CombatSystem {
   static preload(scene: Phaser.Scene) {
-    // Enemy + VFX placeholder textures.
+    // VFX placeholder textures.
     const g = scene.add.graphics()
-
-    // Slime.
-    g.fillStyle(0x42d36d, 1)
-    g.fillRoundedRect(0, 0, 44, 34, 16)
-    g.fillStyle(0x2a7a3f, 0.75)
-    g.fillEllipse(22, 28, 36, 14)
-    g.fillStyle(0x0a0d12, 0.9)
-    g.fillCircle(15, 14, 3)
-    g.fillCircle(29, 14, 3)
-    g.lineStyle(3, 0x0a0d12, 0.65)
-    g.strokeRoundedRect(0, 0, 44, 34, 16)
-    g.generateTexture('slime', 44, 34)
-    g.clear()
-
-    // Bat.
-    g.fillStyle(0x6f3bd9, 1)
-    g.fillEllipse(26, 22, 24, 18)
-    g.fillStyle(0x3a1b7a, 1)
-    g.fillTriangle(26, 22, 4, 10, 10, 30)
-    g.fillTriangle(26, 22, 48, 10, 58, 30)
-    g.fillStyle(0x0a0d12, 0.9)
-    g.fillCircle(22, 20, 2.5)
-    g.fillCircle(30, 20, 2.5)
-    g.lineStyle(3, 0x0a0d12, 0.55)
-    g.strokeEllipse(26, 22, 24, 18)
-    g.strokeTriangle(26, 22, 4, 10, 10, 30)
-    g.strokeTriangle(26, 22, 48, 10, 58, 30)
-    g.generateTexture('bat', 64, 48)
-    g.clear()
 
     // Sword.
     g.fillStyle(0x3b2a1a, 1)

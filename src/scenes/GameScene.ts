@@ -27,6 +27,8 @@ export class GameScene extends Phaser.Scene {
 
   preload() {
     this.load.spritesheet('hero', '/sprites/hero.png', { frameWidth: HERO_W, frameHeight: HERO_H })
+    this.load.spritesheet('slime', '/sprites/slime.png', { frameWidth: 44, frameHeight: 34 })
+    this.load.spritesheet('bat', '/sprites/bat.png', { frameWidth: 64, frameHeight: 48 })
     this.load.image('overworldTiles', '/tilesets/overworld.png')
     this.load.tilemapTiledJSON('overworld', '/maps/overworld.json')
     this.load.tilemapTiledJSON('cave', '/maps/cave.json')
@@ -56,6 +58,7 @@ export class GameScene extends Phaser.Scene {
 
     this.cameras.main.startFollow(this.player, true, 0.12, 0.12)
     this.createHeroAnims()
+    this.createEnemyAnims()
 
     this.mapRuntime = new MapRuntime(this, this.player, {
       onChanged: () => {
@@ -113,6 +116,7 @@ export class GameScene extends Phaser.Scene {
       this.player.setFrame(this.frameFor(this.facing, 0))
     }
 
+    this.health.update()
     this.combat.update()
     this.enemyAI.update(this.time.now)
   }
@@ -134,6 +138,25 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private createEnemyAnims() {
+    if (!this.anims.exists('slime-wiggle')) {
+      this.anims.create({
+        key: 'slime-wiggle',
+        frames: [{ key: 'slime', frame: 0 }, { key: 'slime', frame: 1 }, { key: 'slime', frame: 2 }, { key: 'slime', frame: 1 }],
+        frameRate: 8,
+        repeat: -1,
+      })
+    }
+    if (!this.anims.exists('bat-flap')) {
+      this.anims.create({
+        key: 'bat-flap',
+        frames: [{ key: 'bat', frame: 0 }, { key: 'bat', frame: 1 }, { key: 'bat', frame: 2 }, { key: 'bat', frame: 1 }],
+        frameRate: 12,
+        repeat: -1,
+      })
+    }
+  }
+
   private frameFor(facing: Facing, step: 0 | 1 | 2) {
     const rowByFacing: Record<Facing, number> = { down: 0, up: 1, left: 2, right: 3 }
     return rowByFacing[facing] * 3 + step
@@ -147,8 +170,8 @@ export class GameScene extends Phaser.Scene {
       facing: this.facing,
       getLastAttack: () => this.combat?.getDebug?.() ?? { at: 0, hits: 0 },
       tryAttack: () => this.combat?.tryAttack?.(),
-      playerHp: this.health?.getHp?.() ?? null,
-      playerMaxHp: this.health?.getMaxHp?.() ?? null,
+      getPlayerHp: () => this.health?.getHp?.() ?? null,
+      getPlayerMaxHp: () => this.health?.getMaxHp?.() ?? null,
       enemyCount: rawEnemies.length,
       enemyActives: rawEnemies.map((e: any) => e?.active ?? null),
       getEnemies: () => {

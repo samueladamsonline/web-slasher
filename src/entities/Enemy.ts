@@ -49,6 +49,10 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     const body = this.body as Phaser.Physics.Arcade.Body
     body.setSize(def.body.w, def.body.h)
     body.setOffset(def.body.ox, def.body.oy)
+
+    // Play simple looping anims if they exist (created in GameScene).
+    if (this.kind === 'slime' && scene.anims.exists('slime-wiggle')) this.anims.play('slime-wiggle')
+    if (this.kind === 'bat' && scene.anims.exists('bat-flap')) this.anims.play('bat-flap')
   }
 
   getHp() {

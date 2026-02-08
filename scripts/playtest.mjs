@@ -66,11 +66,15 @@ async function getLastAttack(page) {
 }
 
 async function getPlayerHp(page) {
-  return await page.evaluate(() => globalThis.__dbg?.playerHp ?? null)
+  return await page.evaluate(() =>
+    typeof globalThis.__dbg?.getPlayerHp === 'function' ? globalThis.__dbg.getPlayerHp() : globalThis.__dbg?.playerHp ?? null,
+  )
 }
 
 async function getPlayerMaxHp(page) {
-  return await page.evaluate(() => globalThis.__dbg?.playerMaxHp ?? null)
+  return await page.evaluate(() =>
+    typeof globalThis.__dbg?.getPlayerMaxHp === 'function' ? globalThis.__dbg.getPlayerMaxHp() : globalThis.__dbg?.playerMaxHp ?? null,
+  )
 }
 
 async function pushIntoEnemyAndMeasureDrift(page, enemyKind, enemyX, enemyY) {
@@ -357,6 +361,20 @@ try {
         if (!b1) throw new Error(`bat disappeared; mapKey=${await getMapKey(page)}; enemiesAfter=${JSON.stringify(enemiesAfter)}`)
         const d1 = Math.hypot(b1.x - (b0.x - 120), b1.y - b0.y)
         if (!(d1 < d0)) throw new Error(`expected bat distance to player to decrease; d0=${d0} d1=${d1}`)
+
+        // Contact behavior: if we force a touch, bat should retreat briefly (distance increases).
+        await teleportPlayer(page, b1.x, b1.y)
+        await page.waitForTimeout(120)
+        const enemiesTouch0 = await getEnemies(page)
+        const bt0 = Array.isArray(enemiesTouch0) ? enemiesTouch0.find((e) => e.kind === 'bat') : null
+        if (!bt0) throw new Error('bat missing after touch setup')
+        const dist0 = Math.hypot(bt0.x - b1.x, bt0.y - b1.y)
+        await page.waitForTimeout(380)
+        const enemiesTouch1 = await getEnemies(page)
+        const bt1 = Array.isArray(enemiesTouch1) ? enemiesTouch1.find((e) => e.kind === 'bat') : null
+        if (!bt1) throw new Error('bat missing after touch')
+        const dist1 = Math.hypot(bt1.x - b1.x, bt1.y - b1.y)
+        if (!(dist1 > dist0 + 8)) throw new Error(`expected bat to retreat after touch; dist0=${dist0} dist1=${dist1}`)
       } catch (e) {
         errors.push(`expected bat chase behavior (AI); ${String(e?.message ?? e)}`)
       }
@@ -365,15 +383,22 @@ try {
     // Touch damage sanity: colliding with an enemy should reduce player hp with invuln.
     if (slime) {
       try {
+        const enemiesNow0 = await getEnemies(page)
+        const s0 = Array.isArray(enemiesNow0) ? enemiesNow0.find((e) => e.kind === 'slime') : null
+        if (!s0) throw new Error(`slime not found for touch test; enemies=${JSON.stringify(enemiesNow0)}`)
+
         const hp0 = await getPlayerHp(page)
-        await teleportPlayer(page, slime.x, slime.y)
+        await teleportPlayer(page, typeof s0.bx === 'number' ? s0.bx : s0.x, typeof s0.by === 'number' ? s0.by : s0.y)
         await page.waitForTimeout(250)
         const hp1 = await getPlayerHp(page)
         if (!(typeof hp0 === 'number' && typeof hp1 === 'number')) throw new Error(`hp not numeric; hp0=${hp0} hp1=${hp1}`)
-        if (!(hp1 === hp0 - 1 || hp1 === hp0)) throw new Error(`expected hp drop by 1; hp0=${hp0} hp1=${hp1}`)
+        if (!(hp1 === hp0 - 1)) throw new Error(`expected hp drop by 1 on contact; hp0=${hp0} hp1=${hp1}`)
 
         // Immediately collide again; should not drop again due to invuln.
-        await teleportPlayer(page, slime.x, slime.y)
+        const enemiesNow1 = await getEnemies(page)
+        const s1 = Array.isArray(enemiesNow1) ? enemiesNow1.find((e) => e.kind === 'slime') : null
+        if (!s1) throw new Error(`slime not found for invuln test; enemies=${JSON.stringify(enemiesNow1)}`)
+        await teleportPlayer(page, typeof s1.bx === 'number' ? s1.bx : s1.x, typeof s1.by === 'number' ? s1.by : s1.y)
         await page.waitForTimeout(250)
         const hp2 = await getPlayerHp(page)
         if (typeof hp2 !== 'number') throw new Error(`hp2 not numeric; hp2=${hp2}`)
@@ -385,14 +410,25 @@ try {
 
     if (slime) {
       const { hp0, hp1, before, after, atk0, atk1 } = await slashEnemyAndGetHpDelta(page, 'slime')
-      if (!(typeof hp0 === 'number' && typeof hp1 === 'number')) errors.push(`expected numeric slime hp; before=${JSON.stringify(before)} after=${JSON.stringify(after)}`)
-      else if (hp1 >= hp0) errors.push(`expected slime hp drop; before=${hp0} after=${hp1}; attack=${JSON.stringify({ atk0, atk1 })}`)
+      if (!(typeof hp0 === 'number')) errors.push(`expected numeric slime hp; before=${JSON.stringify(before)} after=${JSON.stringify(after)}`)
+      else if (typeof hp1 === 'number') {
+        if (hp1 >= hp0) errors.push(`expected slime hp drop; before=${hp0} after=${hp1}; attack=${JSON.stringify({ atk0, atk1 })}`)
+      } else {
+        // Enemy may have been killed and removed.
+        const stillThere = Array.isArray(after) ? after.some((e) => e.kind === 'slime') : false
+        if (stillThere) errors.push(`expected slime to be killed or have hp; before=${hp0} afterHp=${hp1}`)
+      }
     }
 
     if (bat) {
       const { hp0, hp1, before, after, atk0, atk1 } = await slashEnemyAndGetHpDelta(page, 'bat')
-      if (!(typeof hp0 === 'number' && typeof hp1 === 'number')) errors.push(`expected numeric bat hp; before=${JSON.stringify(before)} after=${JSON.stringify(after)}`)
-      else if (hp1 >= hp0) errors.push(`expected bat hp drop; before=${hp0} after=${hp1}; attack=${JSON.stringify({ atk0, atk1 })}`)
+      if (!(typeof hp0 === 'number')) errors.push(`expected numeric bat hp; before=${JSON.stringify(before)} after=${JSON.stringify(after)}`)
+      else if (typeof hp1 === 'number') {
+        if (hp1 >= hp0) errors.push(`expected bat hp drop; before=${hp0} after=${hp1}; attack=${JSON.stringify({ atk0, atk1 })}`)
+      } else {
+        const stillThere = Array.isArray(after) ? after.some((e) => e.kind === 'bat') : false
+        if (stillThere) errors.push(`expected bat to be killed or have hp; before=${hp0} afterHp=${hp1}`)
+      }
     }
 
     // Exercise death + delayed timers (spam attacks).
