@@ -88,7 +88,7 @@ export class CombatSystem {
 
   private attackLock = false
   private lastAttack: CombatDebug = { at: 0, hits: 0 }
-  private onSpace = () => this.tryAttack()
+  private spaceKey?: Phaser.Input.Keyboard.Key
 
   constructor(
     scene: Phaser.Scene,
@@ -102,16 +102,20 @@ export class CombatSystem {
   }
 
   bindInput(keyboard: Phaser.Input.Keyboard.KeyboardPlugin) {
-    keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
-    keyboard.on('keydown-SPACE', this.onSpace)
+    this.spaceKey = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)
   }
 
-  destroy(keyboard: Phaser.Input.Keyboard.KeyboardPlugin | null) {
-    if (keyboard) keyboard.off('keydown-SPACE', this.onSpace)
+  destroy(_keyboard: Phaser.Input.Keyboard.KeyboardPlugin | null) {
+    this.spaceKey = undefined
   }
 
   getDebug() {
     return this.lastAttack
+  }
+
+  update() {
+    if (!this.spaceKey) return
+    if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) this.tryAttack()
   }
 
   tryAttack() {
@@ -193,4 +197,3 @@ export class CombatSystem {
     })
   }
 }
-

@@ -10,18 +10,32 @@ function getProp(props: TiledProps | undefined, name: string): unknown {
   return props.find((p) => p?.name === name)?.value
 }
 
+type EnemyStats = Pick<EnemyDef, 'invulnMs' | 'knockback' | 'moveSpeed' | 'leashRadius' | 'touchDamage' | 'touchKnockback' | 'aggroRadius'>
+
 export class Enemy extends Phaser.Physics.Arcade.Sprite {
   readonly kind: EnemyKind
-  private def: EnemyDef
   private hp: number
   private invulnUntil = 0
+  readonly spawnX: number
+  readonly spawnY: number
+  stats: EnemyStats
 
   constructor(scene: Phaser.Scene, x: number, y: number, def: EnemyDef, hpOverride?: number) {
     super(scene, x, y, def.texture)
 
     this.kind = def.kind
-    this.def = def
     this.hp = typeof hpOverride === 'number' ? Math.max(1, Math.floor(hpOverride)) : def.hp
+    this.spawnX = x
+    this.spawnY = y
+    this.stats = {
+      invulnMs: def.invulnMs,
+      knockback: def.knockback,
+      moveSpeed: def.moveSpeed,
+      leashRadius: def.leashRadius,
+      touchDamage: def.touchDamage,
+      touchKnockback: def.touchKnockback,
+      aggroRadius: def.aggroRadius,
+    }
 
     scene.add.existing(this)
     scene.physics.add.existing(this)
@@ -30,6 +44,7 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     this.setOrigin(0.5, 0.9)
     this.setCollideWorldBounds(true)
     this.setPushable(false)
+    this.setImmovable(true)
 
     const body = this.body as Phaser.Physics.Arcade.Body
     body.setSize(def.body.w, def.body.h)
@@ -40,6 +55,26 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     return this.hp
   }
 
+  getTouchDamage() {
+    return this.stats.touchDamage
+  }
+
+  getTouchKnockback() {
+    return this.stats.touchKnockback
+  }
+
+  getMoveSpeed() {
+    return this.stats.moveSpeed
+  }
+
+  getAggroRadius() {
+    return this.stats.aggroRadius ?? 0
+  }
+
+  getLeashRadius() {
+    return this.stats.leashRadius ?? 0
+  }
+
   canTakeDamage(now: number) {
     return this.active && now >= this.invulnUntil
   }
@@ -48,7 +83,7 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     if (!this.canTakeDamage(now)) return false
 
     this.hp = this.hp - Math.max(1, Math.floor(amount))
-    this.invulnUntil = now + this.def.invulnMs
+    this.invulnUntil = now + this.stats.invulnMs
 
     this.setTintFill(0xffffff)
     this.scene.time.delayedCall(70, () => {
@@ -56,7 +91,7 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
       this.clearTint()
     })
 
-    this.applyKnockback(sourceX, sourceY, this.def.knockback)
+    this.applyKnockback(sourceX, sourceY, this.stats.knockback)
 
     if (this.hp <= 0) {
       this.die()
@@ -103,6 +138,16 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     const hpRaw = getProp(props, 'hp')
     const hp = typeof hpRaw === 'number' ? hpRaw : undefined
 
-    return new Enemy(scene, obj.x, obj.y, def, hp)
+    const enemy = new Enemy(scene, obj.x, obj.y, def, hp)
+
+    // Optional overrides from Tiled (kept minimal; defaults live in content/enemies.ts).
+    const speedRaw = getProp(props, 'speed')
+    if (typeof speedRaw === 'number') enemy.stats.moveSpeed = Math.max(0, speedRaw)
+    const aggroRaw = getProp(props, 'aggroRadius')
+    if (typeof aggroRaw === 'number') enemy.stats.aggroRadius = Math.max(0, aggroRaw)
+    const leashRaw = getProp(props, 'leashRadius')
+    if (typeof leashRaw === 'number') enemy.stats.leashRadius = Math.max(0, leashRaw)
+
+    return enemy
   }
 }

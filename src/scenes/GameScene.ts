@@ -4,6 +4,9 @@ import { MapRuntime } from '../game/MapRuntime'
 import { DEPTH_PLAYER, DEPTH_UI, HERO_H, HERO_W } from '../game/constants'
 import type { Facing } from '../game/types'
 import { Enemy } from '../entities/Enemy'
+import { EnemyAISystem } from '../systems/EnemyAISystem'
+import { PlayerHealthSystem } from '../systems/PlayerHealthSystem'
+import { HeartsUI } from '../ui/HeartsUI'
 
 export class GameScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
@@ -15,6 +18,8 @@ export class GameScene extends Phaser.Scene {
 
   private mapRuntime!: MapRuntime
   private combat!: CombatSystem
+  private enemyAI!: EnemyAISystem
+  private health!: PlayerHealthSystem
 
   constructor() {
     super('game')
@@ -27,6 +32,7 @@ export class GameScene extends Phaser.Scene {
     this.load.tilemapTiledJSON('cave', '/maps/cave.json')
 
     CombatSystem.preload(this)
+    HeartsUI.preload(this)
   }
 
   create() {
@@ -51,12 +57,23 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.startFollow(this.player, true, 0.12, 0.12)
     this.createHeroAnims()
 
-    this.mapRuntime = new MapRuntime(this, this.player, { onChanged: () => this.refreshDbg() })
+    this.mapRuntime = new MapRuntime(this, this.player, {
+      onChanged: () => {
+        this.health?.onMapChanged?.()
+        this.refreshDbg()
+      },
+      canWarp: () => (typeof this.health?.canWarp === 'function' ? this.health.canWarp() : true),
+    })
     this.combat = new CombatSystem(this, this.player, {
       getFacing: () => this.facing,
       getEnemyGroup: () => this.mapRuntime.enemies,
     })
     this.combat.bindInput(keyboard)
+
+    this.health = new PlayerHealthSystem(this, this.player, () => this.mapRuntime.enemies)
+    this.health.onMapChanged()
+
+    this.enemyAI = new EnemyAISystem(this.player, () => this.mapRuntime.enemies)
 
     this.mapRuntime.load('overworld', 'player_spawn')
 
@@ -95,6 +112,9 @@ export class GameScene extends Phaser.Scene {
       this.player.anims.stop()
       this.player.setFrame(this.frameFor(this.facing, 0))
     }
+
+    this.combat.update()
+    this.enemyAI.update(this.time.now)
   }
 
   private createHeroAnims() {
@@ -120,18 +140,29 @@ export class GameScene extends Phaser.Scene {
   }
 
   private refreshDbg() {
+    const rawEnemies = this.mapRuntime.enemies?.getChildren?.() ?? []
     ;(window as any).__dbg = {
       player: this.player,
       mapKey: this.mapRuntime.mapKey,
       facing: this.facing,
-      lastAttack: this.combat?.getDebug?.() ?? { at: 0, hits: 0 },
+      getLastAttack: () => this.combat?.getDebug?.() ?? { at: 0, hits: 0 },
+      tryAttack: () => this.combat?.tryAttack?.(),
+      playerHp: this.health?.getHp?.() ?? null,
+      playerMaxHp: this.health?.getMaxHp?.() ?? null,
+      enemyCount: rawEnemies.length,
+      enemyActives: rawEnemies.map((e: any) => e?.active ?? null),
       getEnemies: () => {
         const enemies = this.mapRuntime.enemies?.getChildren?.() ?? []
         return enemies
           .filter((e: any) => e?.active)
-          .map((e: any) =>
-            e instanceof Enemy ? { kind: e.kind, x: e.x, y: e.y, hp: e.getHp() } : { kind: null, x: e.x, y: e.y, hp: null },
-          )
+          .map((e: any) => {
+            const body = e?.body as Phaser.Physics.Arcade.Body | undefined
+            const bx = body?.center?.x ?? e.x
+            const by = body?.center?.y ?? e.y
+            return e instanceof Enemy
+              ? { kind: e.kind, x: e.x, y: e.y, bx, by, hp: e.getHp() }
+              : { kind: null, x: e.x, y: e.y, bx, by, hp: null }
+          })
       },
       depths: {
         ground: this.mapRuntime.groundDepth,

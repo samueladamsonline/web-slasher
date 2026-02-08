@@ -16,6 +16,7 @@ export class MapRuntime {
   private scene: Phaser.Scene
   private player: Phaser.Physics.Arcade.Sprite
   private onChanged?: () => void
+  private canWarp?: () => boolean
 
   private state?: MapRuntimeState
 
@@ -28,10 +29,11 @@ export class MapRuntime {
   private warpOverlaps: Phaser.Physics.Arcade.Collider[] = []
   private transitioning = false
 
-  constructor(scene: Phaser.Scene, player: Phaser.Physics.Arcade.Sprite, opts?: { onChanged?: () => void }) {
+  constructor(scene: Phaser.Scene, player: Phaser.Physics.Arcade.Sprite, opts?: { onChanged?: () => void; canWarp?: () => boolean }) {
     this.scene = scene
     this.player = player
     this.onChanged = opts?.onChanged
+    this.canWarp = opts?.canWarp
   }
 
   get mapKey() {
@@ -155,6 +157,7 @@ export class MapRuntime {
 
       const overlap = this.scene.physics.add.overlap(this.player, zone, () => {
         if (this.transitioning) return
+        if (this.canWarp && !this.canWarp()) return
         this.transitioning = true
 
         this.scene.time.delayedCall(60, () => {

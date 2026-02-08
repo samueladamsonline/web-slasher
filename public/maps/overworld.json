@@ -4,7 +4,7 @@
   "width": 25,
   "infinite": false,
   "nextlayerid": 3,
-  "nextobjectid": 7,
+  "nextobjectid": 8,
   "orientation": "orthogonal",
   "renderorder": "right-down",
   "tiledversion": "1.10.2",
@@ -504,6 +504,11 @@
               "name": "kind",
               "type": "string",
               "value": "slime"
+            },
+            {
+              "name": "speed",
+              "type": "float",
+              "value": 55
             }
           ]
         },
@@ -528,8 +533,53 @@
               "name": "hp",
               "type": "int",
               "value": 2
+            },
+            {
+              "name": "speed",
+              "type": "float",
+              "value": 150
+            },
+            {
+              "name": "aggroRadius",
+              "type": "float",
+              "value": 320
             }
           ]
+        },
+        {
+          "name": "from_cave_fast",
+          "type": "spawn",
+          "x": 224,
+          "y": 416,
+          "width": 0,
+          "height": 0,
+          "rotation": 0,
+          "visible": true,
+          "point": true,
+          "id": 6
+        },
+        {
+          "name": "warp_to_cave_fast",
+          "type": "warp",
+          "x": 256,
+          "y": 320,
+          "width": 64,
+          "height": 64,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "toMap",
+              "type": "string",
+              "value": "cave"
+            },
+            {
+              "name": "toSpawn",
+              "type": "string",
+              "value": "from_overworld_fast"
+            }
+          ],
+          "id": 7
         }
       ]
     }
