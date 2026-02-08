@@ -1,6 +1,7 @@
-import { spawn } from 'node:child_process'
+import http from 'node:http'
 import net from 'node:net'
 import { chromium } from 'playwright'
+import { createServer } from 'vite'
 
 async function getFreePort() {
   return await new Promise((resolve, reject) => {
@@ -26,10 +27,15 @@ async function waitForServerReady(timeoutMs = 20000) {
   const started = Date.now()
   while (Date.now() - started < timeoutMs) {
     try {
-      const browser = await chromium.launch()
-      const page = await browser.newPage()
-      await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 2000 })
-      await browser.close()
+      await new Promise((resolve, reject) => {
+        const req = http.get(URL, (res) => {
+          res.resume()
+          if ((res.statusCode ?? 0) >= 200) resolve()
+          else reject(new Error(`bad status: ${res.statusCode}`))
+        })
+        req.on('error', reject)
+        req.setTimeout(2000, () => req.destroy(new Error('timeout')))
+      })
       return
     } catch {
       await wait(250)
@@ -38,22 +44,15 @@ async function waitForServerReady(timeoutMs = 20000) {
   throw new Error(`Dev server did not become ready at ${URL} within ${timeoutMs}ms`)
 }
 
-const dev = spawn('npm', ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'], {
-  stdio: 'pipe',
-  env: { ...process.env, BROWSER: 'none' },
+const server = await createServer({
+  server: { host: '127.0.0.1', port: PORT, strictPort: true },
+  clearScreen: false,
+  // Reduce noise in CI output, but keep errors visible.
+  logLevel: 'warn',
 })
 
-let devOutput = ''
-const onData = (buf) => {
-  const s = buf.toString('utf8')
-  devOutput += s
-  if (devOutput.length > 20000) devOutput = devOutput.slice(-20000)
-}
-
-dev.stdout.on('data', onData)
-dev.stderr.on('data', onData)
-
 try {
+  await server.listen()
   await waitForServerReady()
 
   const browser = await chromium.launch()
@@ -81,9 +80,7 @@ try {
   console.log(`OK: ${URL}`)
 } catch (err) {
   console.error(String(err?.stack ?? err))
-  console.error('\nLast dev server output:')
-  console.error(devOutput)
   process.exitCode = 1
 } finally {
-  dev.kill('SIGTERM')
+  await server.close()
 }
