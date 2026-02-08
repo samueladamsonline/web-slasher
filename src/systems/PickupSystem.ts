@@ -82,7 +82,9 @@ export class PickupSystem {
   private mapKey: MapKey | null = null
   private group?: Phaser.Physics.Arcade.Group
   private overlap?: Phaser.Physics.Arcade.Collider
-  private autoPickupRadius = 64
+  // Keep loot feeling snappy. This is slightly larger than a tile, so minor knockback
+  // or spawn scatter won't make drops feel "missed".
+  private autoPickupRadius = 80
 
   constructor(
     scene: Phaser.Scene,
@@ -169,13 +171,15 @@ export class PickupSystem {
     if (!mapKey) return
 
     const r2 = this.autoPickupRadius * this.autoPickupRadius
-    const kids = this.group.getChildren() as unknown as Phaser.GameObjects.GameObject[]
+    const kids = this.group.getChildren() as unknown as any[]
     for (const go of kids) {
-      if (!(go instanceof Phaser.Physics.Arcade.Sprite)) continue
-      if (!go.active) continue
-      const dx = go.x - this.player.x
-      const dy = go.y - this.player.y
-      if (dx * dx + dy * dy <= r2) this.tryCollect(go)
+      // Avoid brittle `instanceof` checks across bundlers; we only care about objects we spawned.
+      const s = go as Phaser.Physics.Arcade.Sprite
+      if (!s?.active) continue
+      if (!(s as any).__pickup) continue
+      const dx = s.x - this.player.x
+      const dy = s.y - this.player.y
+      if (dx * dx + dy * dy <= r2) this.tryCollect(s)
     }
   }
 

@@ -10,6 +10,7 @@ import { LootSystem } from '../systems/LootSystem'
 import { PickupSystem } from '../systems/PickupSystem'
 import { PlayerHealthSystem } from '../systems/PlayerHealthSystem'
 import { CombatSystem } from '../systems/CombatSystem'
+import { SaveSystem, type SaveDataV1 } from '../systems/SaveSystem'
 import { HeartsUI } from '../ui/HeartsUI'
 import { DialogueUI } from '../ui/DialogueUI'
 import { InteractPromptUI } from '../ui/InteractPromptUI'
@@ -23,6 +24,7 @@ export class GameScene extends Phaser.Scene {
   private keyEsc!: Phaser.Input.Keyboard.Key
   private keyI!: Phaser.Input.Keyboard.Key
   private keyEnter!: Phaser.Input.Keyboard.Key
+  private keyN!: Phaser.Input.Keyboard.Key
   private key1!: Phaser.Input.Keyboard.Key
   private key2!: Phaser.Input.Keyboard.Key
 
@@ -37,17 +39,27 @@ export class GameScene extends Phaser.Scene {
   private world!: WorldState
   private inventory!: InventorySystem
   private pickups!: PickupSystem
+  private save!: SaveSystem
   private dialogueUI!: DialogueUI
   private promptUI!: InteractPromptUI
   private interactions!: InteractionSystem
   private mapNameUI!: MapNameUI
   private overlay!: OverlayUI
 
+  private startMenu = true
+  private startLoading = true
+  private startBusy = false
+  private startBusyMessage: string | null = null
+  private startCanContinue = false
+  private startError: string | null = null
+  private startLoadedSave: SaveDataV1 | null = null
+  private startToken = 0
+
   private paused = false
   private pauseMode: 'pause' | 'inventory' = 'pause'
   private gameOver = false
   private dialoguePaused = false
-  private checkpoint: { mapKey: string; spawnName: string } = { mapKey: 'overworld', spawnName: 'player_spawn' }
+  private checkpoint: { mapKey: 'overworld' | 'cave'; spawnName: string } = { mapKey: 'overworld', spawnName: 'player_spawn' }
 
   constructor() {
     super('game')
@@ -79,6 +91,7 @@ export class GameScene extends Phaser.Scene {
     this.keyEsc = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC)
     this.keyI = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I)
     this.keyEnter = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER)
+    this.keyN = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.N)
     this.key1 = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ONE)
     this.key2 = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TWO)
 
@@ -102,12 +115,22 @@ export class GameScene extends Phaser.Scene {
 
     this.world = new WorldState()
     this.inventory = new InventorySystem()
+    this.save = new SaveSystem({
+      inventory: this.inventory,
+      world: this.world,
+      getCheckpoint: () => ({ mapKey: this.checkpoint.mapKey, spawnName: this.checkpoint.spawnName }),
+    })
+    // Only start saving once the player starts a new game or continues.
+    this.save.setEnabled(false)
+    this.inventory.setOnChanged(() => this.save.requestSave())
+    this.world.setOnChanged(() => this.save.requestSave())
 
     this.mapRuntime = new MapRuntime(this, this.player, {
       onChanged: () => {
         this.health?.onMapChanged?.()
         this.updateCheckpoint()
         this.mapNameUI.set(this.mapRuntime.mapKey)
+        this.save?.requestSave?.()
         this.refreshDbg()
       },
       canWarp: () => (typeof this.health?.canWarp === 'function' ? this.health.canWarp() : true),
@@ -138,14 +161,30 @@ export class GameScene extends Phaser.Scene {
 
     this.enemyAI = new EnemyAISystem(this.player, () => this.mapRuntime.enemies)
 
-    this.mapRuntime.load('overworld', 'player_spawn')
-    this.updateCheckpoint()
-    this.mapNameUI.set(this.mapRuntime.mapKey)
+    // Start menu (New Game / Continue) is shown before loading a map.
+    this.mapNameUI.set(null)
+    this.openStartMenu()
+    void this.refreshStartMenuState()
 
     this.refreshDbg()
   }
 
   update() {
+    if (this.startMenu) {
+      if (this.startBusy) return
+      if (Phaser.Input.Keyboard.JustDown(this.keyN)) {
+        void this.startNewGame()
+        return
+      }
+      if (this.startLoading) return
+      if (Phaser.Input.Keyboard.JustDown(this.keyEnter)) {
+        if (this.startCanContinue) void this.continueGame()
+        else void this.startNewGame()
+        return
+      }
+      return
+    }
+
     if (this.gameOver) {
       if (Phaser.Input.Keyboard.JustDown(this.keyEnter)) this.respawn()
       return
@@ -261,6 +300,9 @@ export class GameScene extends Phaser.Scene {
       mapKey: this.mapRuntime.mapKey,
       spawnName: this.mapRuntime.spawnName,
       facing: this.facing,
+      hasSave: () => this.save?.hasSave?.() ?? false,
+      saveNow: () => this.save?.saveNow?.() ?? false,
+      clearSave: () => this.save?.clear?.(),
       getLastAttack: () => this.combat?.getDebug?.() ?? { at: 0, hits: 0 },
       tryAttack: () => this.combat?.tryAttack?.(),
       tryInteract: () => this.interactions?.tryInteract?.(),
@@ -289,6 +331,10 @@ export class GameScene extends Phaser.Scene {
           })
       },
       getGameState: () => ({
+        startMenu: this.startMenu,
+        startLoading: this.startLoading,
+        startCanContinue: this.startCanContinue,
+        startBusy: this.startBusy,
         paused: this.paused,
         pauseMode: this.pauseMode,
         gameOver: this.gameOver,
@@ -307,7 +353,7 @@ export class GameScene extends Phaser.Scene {
   private updateCheckpoint() {
     const mk = this.mapRuntime.mapKey
     const sn = this.mapRuntime.spawnName
-    if (typeof mk === 'string' && mk && typeof sn === 'string' && sn) this.checkpoint = { mapKey: mk, spawnName: sn }
+    if (mk && typeof sn === 'string' && sn) this.checkpoint = { mapKey: mk, spawnName: sn }
   }
 
   private setPaused(paused: boolean, mode: 'pause' | 'inventory' = this.pauseMode) {
@@ -376,9 +422,129 @@ export class GameScene extends Phaser.Scene {
     this.anims.resumeAll()
     this.overlay.hide()
 
-    this.mapRuntime.load(this.checkpoint.mapKey as any, this.checkpoint.spawnName)
+    this.mapRuntime.load(this.checkpoint.mapKey, this.checkpoint.spawnName)
     this.updateCheckpoint()
     this.mapNameUI.set(this.mapRuntime.mapKey)
+    this.refreshDbg()
+  }
+
+  private async refreshStartMenuState() {
+    const token = ++this.startToken
+    this.startLoading = true
+    this.startError = null
+    this.startCanContinue = false
+    this.startLoadedSave = null
+    this.openStartMenu()
+
+    const res = await this.save.load()
+    if (token !== this.startToken) return
+    if (!this.startMenu) return
+
+    this.startLoading = false
+    this.startError = res.status === 'error' ? res.error : null
+    this.startCanContinue = res.status === 'ok'
+    this.startLoadedSave = res.status === 'ok' ? res.data : null
+    this.openStartMenu()
+  }
+
+  private openStartMenu() {
+    this.startMenu = true
+    this.paused = false
+    this.pauseMode = 'pause'
+    this.gameOver = false
+    this.dialoguePaused = false
+    this.player.setVelocity(0, 0)
+    this.physics.world.pause()
+    this.anims.pauseAll()
+
+    const lines: string[] = []
+    if (this.startBusy) {
+      lines.push(this.startBusyMessage ?? 'Working...')
+      lines.push('Please wait.')
+    } else if (this.startLoading) {
+      lines.push('Checking for an existing save...')
+      lines.push('')
+      lines.push('N: New Game')
+    } else if (this.startError) {
+      lines.push('Save data could not be loaded.')
+      lines.push(this.startError)
+      lines.push('')
+      lines.push('N: New Game')
+    } else if (this.startCanContinue) {
+      lines.push('ENTER: Continue')
+      lines.push('N: New Game (clears save)')
+    } else {
+      lines.push('ENTER: New Game')
+    }
+    lines.push('')
+    lines.push('WASD: Move   SPACE: Attack   E: Interact   I: Inventory')
+    this.overlay.showStart(lines)
+    this.refreshDbg()
+  }
+
+  private async startNewGame() {
+    const token = ++this.startToken
+    this.startBusy = true
+    this.startBusyMessage = 'Starting new game...'
+    this.openStartMenu()
+
+    await this.save.clear()
+    this.save.setEnabled(false)
+    this.world.clear()
+    this.inventory.reset()
+    this.health.reset()
+
+    this.checkpoint = { mapKey: 'overworld', spawnName: 'player_spawn' }
+    if (token !== this.startToken) return
+    await this.startAtCheckpoint(this.checkpoint)
+  }
+
+  private async continueGame() {
+    const token = ++this.startToken
+    this.startBusy = true
+    this.startBusyMessage = 'Loading save...'
+    this.openStartMenu()
+
+    let data = this.startLoadedSave
+    if (!data) {
+      const res = await this.save.load()
+      if (token !== this.startToken) return
+      if (res.status !== 'ok') {
+        this.startBusy = false
+        this.startBusyMessage = null
+        void this.refreshStartMenuState()
+        this.openStartMenu()
+        return
+      }
+      data = res.data
+    }
+
+    const cp = this.save.apply(data)
+    this.health.reset()
+    this.checkpoint = cp
+    if (token !== this.startToken) return
+    await this.startAtCheckpoint(cp)
+  }
+
+  private async startAtCheckpoint(cp: { mapKey: 'overworld' | 'cave'; spawnName: string }) {
+    this.startMenu = false
+    this.startLoading = false
+    this.startBusy = false
+    this.startBusyMessage = null
+    this.overlay.hide()
+
+    // Load while paused, then resume.
+    this.player.setVelocity(0, 0)
+    this.physics.world.pause()
+    this.anims.pauseAll()
+
+    this.mapRuntime.load(cp.mapKey, cp.spawnName)
+
+    this.physics.world.resume()
+    this.anims.resumeAll()
+
+    this.save.setEnabled(true)
+    await this.save.saveNow()
     this.refreshDbg()
   }
 }

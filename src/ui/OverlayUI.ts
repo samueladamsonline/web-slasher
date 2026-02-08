@@ -60,6 +60,13 @@ export class OverlayUI {
     this.layout()
   }
 
+  showStart(lines: string[]) {
+    this.title.setText('WEB SLASHER')
+    this.body.setText(lines.join('\n'))
+    this.container.setVisible(true)
+    this.layout()
+  }
+
   showInventory(lines: string[]) {
     this.title.setText('INVENTORY')
     this.body.setText(lines.join('\n'))

@@ -339,6 +339,13 @@ try {
   await page.click('canvas')
   await page.waitForTimeout(500)
 
+  // Start at the main menu. Use "N" to force a new game (deterministic).
+  await page.waitForFunction(() => typeof globalThis.__dbg?.getGameState === 'function', null, { timeout: 10000 })
+  await page.keyboard.down('n')
+  await page.waitForTimeout(80)
+  await page.keyboard.up('n')
+  await waitForMapKey(page, 'overworld', 5000)
+
   const start = await getPlayerPos(page)
   if (!start) errors.push('debug player not found on window.__dbg.player')
 
@@ -383,7 +390,7 @@ try {
   if (afterDown && afterDown.y <= 800) errors.push(`expected to be past y=800 (no invisible wall at 600); afterDown.y=${afterDown.y}`)
 
   // Quick collision sanity: try to walk into a known rock at grid (5,4) => (352,288).
-  await teleportPlayer(page, 260, 288)
+  await teleportPlayer(page, 280, 288)
   await page.waitForTimeout(50)
   await page.keyboard.down('d')
   await page.waitForTimeout(1500)
@@ -541,6 +548,20 @@ try {
     const bat = enemies0.find((e) => e.kind === 'bat')
     if (!slime || !bat) errors.push(`expected both slime and bat; got ${JSON.stringify(enemies0)}`)
 
+    // Stabilize HP so combat checks don't flake due to accidental deaths mid-suite.
+    try {
+      const st0 = await getGameState(page)
+      if (st0?.gameOver) {
+        await respawn(page)
+        await page.waitForTimeout(350)
+      }
+      const max = await getPlayerMaxHp(page)
+      if (typeof max === 'number') await setPlayerHp(page, max)
+      await page.waitForTimeout(80)
+    } catch {
+      // ignore
+    }
+
     const first = enemies0[0]
     const driftPos = await pushIntoEnemyAndMeasureDrift(page, first.kind, typeof first.bx === 'number' ? first.bx : first.x, typeof first.by === 'number' ? first.by : first.y)
     if (driftPos) {
@@ -646,6 +667,20 @@ try {
       await equipWeapon(page, 'sword')
     }
 
+    // Stabilize before loot check: the earlier combat suite may have caused a death.
+    try {
+      const st0 = await getGameState(page)
+      if (st0?.gameOver) {
+        await respawn(page)
+        await page.waitForTimeout(350)
+      }
+      const max = await getPlayerMaxHp(page)
+      if (typeof max === 'number') await setPlayerHp(page, max)
+      await page.waitForTimeout(80)
+    } catch {
+      // ignore
+    }
+
     // Loot sanity: killing an enemy should drop coins that auto-collect.
     try {
       const inv0 = await getInventory(page)
@@ -655,7 +690,33 @@ try {
       await page.waitForTimeout(250)
       const inv1 = await getInventory(page)
       if (!(inv1 && typeof inv1.coins === 'number')) throw new Error(`bad inventory snapshot after loot: ${JSON.stringify(inv1)}`)
-      if (inv1.coins < inv0.coins + 1) throw new Error(`expected coin loot on enemy death; coins0=${inv0.coins} coins1=${inv1.coins}`)
+      if (inv1.coins < inv0.coins + 1) {
+        const dbg = await page.evaluate(() => {
+          const scene = globalThis.__dbg?.player?.scene
+          const ps = scene?.pickups
+          const group = ps?.group
+          const kids = group?.getChildren?.() ?? []
+          const activeKids = kids.filter((k) => k?.active)
+          const p = globalThis.__dbg?.player
+          const px = typeof p?.x === 'number' ? p.x : null
+          const py = typeof p?.y === 'number' ? p.y : null
+          return {
+            mapKey: globalThis.__dbg?.mapKey ?? null,
+            gameState: typeof globalThis.__dbg?.getGameState === 'function' ? globalThis.__dbg.getGameState() : null,
+            player: { x: px, y: py },
+            autoPickupRadius: ps?.autoPickupRadius ?? null,
+            pickupMapKey: ps?.mapKey ?? null,
+            pickupCount: kids.length,
+            pickupActives: activeKids.map((k) => {
+              const x = typeof k?.x === 'number' ? k.x : null
+              const y = typeof k?.y === 'number' ? k.y : null
+              const d = typeof x === 'number' && typeof y === 'number' && typeof px === 'number' && typeof py === 'number' ? Math.hypot(x - px, y - py) : null
+              return { x, y, d, meta: k?.__pickup ?? null }
+            }),
+          }
+        })
+        throw new Error(`expected coin loot on enemy death; coins0=${inv0.coins} coins1=${inv1.coins}; dbg=${JSON.stringify(dbg)}`)
+      }
     } catch (e) {
       errors.push(`expected loot drops; ${String(e?.message ?? e)}`)
     }
@@ -785,6 +846,79 @@ try {
     await waitForMapKey(page, 'overworld', 3000)
   } catch (e) {
     errors.push(`expected fast warp back to overworld; ${String(e?.message ?? e)}`)
+  }
+
+  // Save/Load sanity: force-save, reload the page, continue, and verify state persists.
+  try {
+    // Move to cave so checkpoint persistence is testable.
+    await teleportPlayer(page, 288, 352)
+    await page.waitForTimeout(200)
+    await waitForMapKey(page, 'cave', 3000)
+
+    // Make a deterministic change right before saving.
+    await equipWeapon(page, 'greatsword')
+    await page.waitForTimeout(80)
+
+    const invSavedRaw = await getInventory(page)
+    if (!(invSavedRaw && typeof invSavedRaw.coins === 'number' && typeof invSavedRaw.keys === 'number')) {
+      throw new Error(`bad inventory snapshot before save: ${JSON.stringify(invSavedRaw)}`)
+    }
+    const invSaved = { ...invSavedRaw, ownedWeapons: [...(invSavedRaw.ownedWeapons ?? [])].slice().sort() }
+
+    const savedOk = await page.evaluate(() => globalThis.__dbg?.saveNow?.())
+    if (!savedOk) throw new Error(`saveNow returned ${String(savedOk)}`)
+
+    await page.reload({ waitUntil: 'networkidle' })
+    await page.waitForSelector('canvas', { timeout: 10000 })
+    await page.click('canvas')
+    await page.waitForFunction(() => typeof globalThis.__dbg?.getGameState === 'function', null, { timeout: 10000 })
+
+    // Wait until the menu has finished checking for a save, then continue.
+    const started = Date.now()
+    while (Date.now() - started < 6000) {
+      const st = await getGameState(page)
+      if (st?.startMenu && !st?.startLoading) break
+      await page.waitForTimeout(100)
+    }
+    const st = await getGameState(page)
+    if (!st?.startMenu) throw new Error(`expected startMenu after reload; state=${JSON.stringify(st)}`)
+    if (st?.startLoading) throw new Error(`expected start menu ready after reload; state=${JSON.stringify(st)}`)
+    if (!st?.startCanContinue) throw new Error(`expected startCanContinue=true after reload; state=${JSON.stringify(st)}`)
+
+    await page.keyboard.down('Enter')
+    await page.waitForTimeout(80)
+    await page.keyboard.up('Enter')
+    await waitForMapKey(page, 'cave', 5000)
+
+    const invAfterRaw = await getInventory(page)
+    if (!(invAfterRaw && typeof invAfterRaw.coins === 'number' && typeof invAfterRaw.keys === 'number')) {
+      throw new Error(`bad inventory snapshot after load: ${JSON.stringify(invAfterRaw)}`)
+    }
+    const invAfter = { ...invAfterRaw, ownedWeapons: [...(invAfterRaw.ownedWeapons ?? [])].slice().sort() }
+
+    if (JSON.stringify(invAfter) !== JSON.stringify(invSaved)) {
+      throw new Error(`expected inventory to persist; before=${JSON.stringify(invSaved)} after=${JSON.stringify(invAfter)}`)
+    }
+
+    // Chest should remain opened (no extra key reward).
+    await teleportPlayer(page, 352, 288)
+    await page.waitForTimeout(200)
+    await waitForMapKey(page, 'overworld', 3000)
+    await teleportPlayer(page, 352, 416)
+    await page.waitForTimeout(120)
+    const keysBefore = invAfter.keys
+    await tryInteract(page)
+    await page.waitForTimeout(120)
+    const invChest = await getInventory(page)
+    if (!(invChest && typeof invChest.keys === 'number')) throw new Error(`bad inventory after chest check: ${JSON.stringify(invChest)}`)
+    if (invChest.keys !== keysBefore) throw new Error(`expected chest to stay empty after load; keysBefore=${keysBefore} keysAfter=${invChest.keys}`)
+    const dlg = await getDialogue(page)
+    if (!dlg?.open) throw new Error(`expected dialogue open for chest; dlg=${JSON.stringify(dlg)}`)
+    if (!String(dlg.text ?? '').toLowerCase().includes('empty')) throw new Error(`expected empty-chest text after load; dlg=${JSON.stringify(dlg)}`)
+    await tryInteract(page) // close
+    await page.waitForTimeout(80)
+  } catch (e) {
+    errors.push(`expected save/load persistence; ${String(e?.message ?? e)}`)
   }
 
   const canvasCount = await page.locator('canvas').count()
