@@ -122,7 +122,6 @@ export class InteractionSystem {
   private onDialogueOpen?: () => void
   private onDialogueClose?: () => void
 
-  private keyE: Phaser.Input.Keyboard.Key
   private interactables: Interactable[] = []
   private activeTarget: Interactable | null = null
   private requestWarp: ((toMap: MapKey, toSpawn: string) => void) | null = null
@@ -141,10 +140,6 @@ export class InteractionSystem {
     this.prompt = deps.prompt
     this.onDialogueOpen = opts?.onDialogueOpen
     this.onDialogueClose = opts?.onDialogueClose
-
-    const keyboard = scene.input.keyboard
-    if (!keyboard) throw new Error('Keyboard input missing')
-    this.keyE = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E)
   }
 
   destroy() {
@@ -260,20 +255,13 @@ export class InteractionSystem {
   }
 
   update() {
-    if (this.dialogue.isOpen()) {
-      if (Phaser.Input.Keyboard.JustDown(this.keyE)) this.closeDialogue()
-      return
-    }
+    if (this.dialogue.isOpen()) return
 
     const target = this.pickTarget()
     this.activeTarget = target
 
     if (target) this.prompt.showAt(target.x, target.y - 76)
     else this.prompt.hide()
-
-    if (target && Phaser.Input.Keyboard.JustDown(this.keyE)) {
-      this.interact(target)
-    }
   }
 
   private pickTarget() {

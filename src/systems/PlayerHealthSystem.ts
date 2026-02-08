@@ -11,7 +11,7 @@ export class PlayerHealthSystem {
   private maxHp = 5
   private hp = 5
   private invulnUntil = 0
-  private touchInvulnMs = 550
+  private touchInvulnMs = 800
   private warpLockUntil = 0
 
   private overlap?: Phaser.Physics.Arcade.Collider

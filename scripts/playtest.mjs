@@ -162,24 +162,28 @@ async function slashEnemyAndGetHpDelta(page, kind) {
   const ty = typeof nowEnemy.by === 'number' ? nowEnemy.by : nowEnemy.y
 
   // Freeze the target briefly so fast enemies (like bats) don't dodge the one-frame slash hitbox.
+  // Also freeze *other* enemies to avoid accidental collateral hits causing flakes (e.g. slime wandering into a bat slash).
   await page.evaluate(({ kind }) => {
     const scene = globalThis.__dbg?.player?.scene
     const group = scene?.mapRuntime?.enemies
     const kids = group?.getChildren?.() ?? []
     const target = kids.find((e) => e?.kind === kind)
     if (!target) return
-    target.__testPrevSpeed = target.stats?.moveSpeed
-    if (target.stats) target.stats.moveSpeed = 0
-    if (typeof target.setVelocity === 'function') target.setVelocity(0, 0)
+    for (const e of kids) {
+      if (!e?.stats) continue
+      // Record original speed once per enemy so restore works even if multiple tests touch the same enemy.
+      if (typeof e.__testPrevSpeed !== 'number') e.__testPrevSpeed = e.stats.moveSpeed
+      e.stats.moveSpeed = 0
+      if (typeof e.setVelocity === 'function') e.setVelocity(0, 0)
+    }
   }, { kind })
 
   await teleportPlayer(page, tx - 42, ty)
   await page.waitForTimeout(80)
   await page.evaluate(() => {
-    const scene = globalThis.__dbg?.player?.scene
     const p = globalThis.__dbg?.player
-    if (!scene || !p) return
-    scene.facing = 'right'
+    if (!p) return
+    if (typeof globalThis.__dbg?.setFacing === 'function') globalThis.__dbg.setFacing('right')
     if (typeof p.setVelocity === 'function') p.setVelocity(0, 0)
   })
   await page.waitForTimeout(40)
@@ -206,9 +210,12 @@ async function slashEnemyAndGetHpDelta(page, kind) {
     const kids = group?.getChildren?.() ?? []
     const target = kids.find((e) => e?.kind === kind)
     if (!target) return
-    const prev = target.__testPrevSpeed
-    if (typeof prev === 'number' && target.stats) target.stats.moveSpeed = prev
-    delete target.__testPrevSpeed
+    for (const e of kids) {
+      if (!e?.stats) continue
+      const prev = e.__testPrevSpeed
+      if (typeof prev === 'number') e.stats.moveSpeed = prev
+      delete e.__testPrevSpeed
+    }
   }, { kind })
 
   return { hp0, hp1, before, after, atk0, atk1 }
@@ -242,10 +249,9 @@ async function killEnemy(page, kind, maxSwings = 10) {
     await teleportPlayer(page, tx - 42, ty)
     await page.waitForTimeout(80)
     await page.evaluate(() => {
-      const scene = globalThis.__dbg?.player?.scene
       const p = globalThis.__dbg?.player
-      if (!scene || !p) return
-      scene.facing = 'right'
+      if (!p) return
+      if (typeof globalThis.__dbg?.setFacing === 'function') globalThis.__dbg.setFacing('right')
       if (typeof p.setVelocity === 'function') p.setVelocity(0, 0)
     })
     await page.waitForTimeout(40)
@@ -646,9 +652,13 @@ try {
         if (!s0) throw new Error(`slime not found for touch test; enemies=${JSON.stringify(enemiesNow0)}`)
 
         // Ensure we aren't still invulnerable from earlier enemy contact tests.
+        // Important: move away from all enemies first so we don't re-trigger touch damage
+        // while waiting for invuln to expire (this was causing flakes).
+        await teleportPlayer(page, 100, 100)
+        await page.waitForTimeout(80)
         const max = await getPlayerMaxHp(page)
         if (typeof max === 'number') await setPlayerHp(page, max)
-        await page.waitForTimeout(650)
+        await page.waitForTimeout(700)
 
         const hp0 = await getPlayerHp(page)
         await teleportPlayer(page, typeof s0.bx === 'number' ? s0.bx : s0.x, typeof s0.by === 'number' ? s0.by : s0.y)
@@ -713,18 +723,37 @@ try {
       // ignore
     }
 
-    // Loot sanity: killing an enemy should drop coins that auto-collect.
-    try {
-      const inv0 = await getInventory(page)
-      if (!(inv0 && typeof inv0.coins === 'number')) throw new Error(`bad inventory snapshot before loot: ${JSON.stringify(inv0)}`)
-      const enemiesStart = await getEnemies(page)
-      const hasSlime = Array.isArray(enemiesStart) ? enemiesStart.some((e) => e.kind === 'slime') : false
-      if (!hasSlime) throw new Error(`slime not found for loot test; enemies=${JSON.stringify(enemiesStart)}`)
-      const ok = await killEnemy(page, 'slime', 10)
-      if (!ok) throw new Error('failed to kill slime for loot test')
-      await page.waitForTimeout(250)
-      const inv1 = await getInventory(page)
-      if (!(inv1 && typeof inv1.coins === 'number')) throw new Error(`bad inventory snapshot after loot: ${JSON.stringify(inv1)}`)
+	    // Loot sanity: killing an enemy should drop coins that auto-collect.
+	    try {
+	      const inv0 = await getInventory(page)
+	      if (!(inv0 && typeof inv0.coins === 'number')) throw new Error(`bad inventory snapshot before loot: ${JSON.stringify(inv0)}`)
+	      let enemiesStart = await getEnemies(page)
+	      let hasSlime = Array.isArray(enemiesStart) ? enemiesStart.some((e) => e.kind === 'slime') : false
+	      if (!hasSlime) {
+	        // Earlier suites may legitimately kill both overworld enemies (bat greatsword test can kill the bat,
+	        // and if the slime wanders too close it can get hit as collateral). Reload the map enemies so this
+	        // test always validates loot drops deterministically.
+	        await teleportPlayer(page, 100, 100)
+	        await page.waitForTimeout(120)
+	        await page.waitForTimeout(650)
+
+	        // Overworld fast warp loop: overworld -> cave -> overworld.
+	        await teleportPlayer(page, 288, 352)
+	        await page.waitForTimeout(220)
+	        await waitForMapKey(page, 'cave', 3000)
+	        await teleportPlayer(page, 352, 288)
+	        await page.waitForTimeout(220)
+	        await waitForMapKey(page, 'overworld', 3000)
+
+	        enemiesStart = await getEnemies(page)
+	        hasSlime = Array.isArray(enemiesStart) ? enemiesStart.some((e) => e.kind === 'slime') : false
+	      }
+	      if (!hasSlime) throw new Error(`slime not found for loot test; enemies=${JSON.stringify(enemiesStart)}`)
+	      const ok = await killEnemy(page, 'slime', 10)
+	      if (!ok) throw new Error('failed to kill slime for loot test')
+	      await page.waitForTimeout(250)
+	      const inv1 = await getInventory(page)
+	      if (!(inv1 && typeof inv1.coins === 'number')) throw new Error(`bad inventory snapshot after loot: ${JSON.stringify(inv1)}`)
       if (inv1.coins < inv0.coins + 1) {
         const dbg = await page.evaluate(() => {
           const scene = globalThis.__dbg?.player?.scene
@@ -833,6 +862,11 @@ try {
   } catch (e) {
     errors.push(`expected touchDamage override; ${String(e?.message ?? e)}`)
   }
+
+  // Stabilize after forced touch tests: ensure invuln has expired and we are not still colliding.
+  // (Otherwise game-over tests can fail when the player is still invulnerable.)
+  await teleportPlayer(page, 288, 224)
+  await page.waitForTimeout(900)
 
   // Game over + respawn: drop to 0 hp then respawn at checkpoint.
   try {

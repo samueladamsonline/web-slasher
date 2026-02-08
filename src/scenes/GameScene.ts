@@ -1,10 +1,10 @@
 import * as Phaser from 'phaser'
 import { MapRuntime } from '../game/MapRuntime'
-import { DEPTH_PLAYER, HERO_H, HERO_W } from '../game/constants'
-import type { Facing } from '../game/types'
 import { Enemy } from '../entities/Enemy'
+import { Hero } from '../entities/Hero'
 import { EnemyAISystem } from '../systems/EnemyAISystem'
 import { InteractionSystem } from '../systems/InteractionSystem'
+import { InputSystem } from '../systems/InputSystem'
 import { InventorySystem } from '../systems/InventorySystem'
 import { LootSystem } from '../systems/LootSystem'
 import { PickupSystem } from '../systems/PickupSystem'
@@ -20,19 +20,9 @@ import { OverlayUI } from '../ui/OverlayUI'
 import { WorldState } from '../game/WorldState'
 
 export class GameScene extends Phaser.Scene {
-  private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
-  private wasd!: { up: Phaser.Input.Keyboard.Key; down: Phaser.Input.Keyboard.Key; left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key }
-  private keyEsc!: Phaser.Input.Keyboard.Key
-  private keyI!: Phaser.Input.Keyboard.Key
-  private keyM!: Phaser.Input.Keyboard.Key
-  private keyEnter!: Phaser.Input.Keyboard.Key
-  private keyN!: Phaser.Input.Keyboard.Key
-  private key1!: Phaser.Input.Keyboard.Key
-  private key2!: Phaser.Input.Keyboard.Key
-
-  private player!: Phaser.Physics.Arcade.Sprite
+  private controls!: InputSystem
+  private hero!: Hero
   private speed = 240
-  private facing: Facing = 'down'
 
   private mapRuntime!: MapRuntime
   private combat!: CombatSystem
@@ -69,7 +59,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.spritesheet('hero', '/sprites/hero.png', { frameWidth: HERO_W, frameHeight: HERO_H })
+    Hero.preload(this)
     this.load.spritesheet('slime', '/sprites/slime.png', { frameWidth: 44, frameHeight: 34 })
     this.load.spritesheet('bat', '/sprites/bat.png', { frameWidth: 64, frameHeight: 48 })
     this.load.image('overworldTiles', '/tilesets/overworld.png')
@@ -83,33 +73,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   create() {
-    const keyboard = this.input.keyboard!
-    this.cursors = keyboard.createCursorKeys()
-    this.wasd = keyboard.addKeys({
-      up: Phaser.Input.Keyboard.KeyCodes.W,
-      left: Phaser.Input.Keyboard.KeyCodes.A,
-      down: Phaser.Input.Keyboard.KeyCodes.S,
-      right: Phaser.Input.Keyboard.KeyCodes.D,
-    }) as { up: Phaser.Input.Keyboard.Key; down: Phaser.Input.Keyboard.Key; left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key }
-    this.keyEsc = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC)
-    this.keyI = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I)
-    this.keyM = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M)
-    this.keyEnter = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER)
-    this.keyN = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.N)
-    this.key1 = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ONE)
-    this.key2 = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TWO)
+    this.controls = new InputSystem(this)
 
-    this.player = this.physics.add.sprite(0, 0, 'hero', this.frameFor(this.facing, 0))
-    this.player.setOrigin(0.5, 0.8)
-    this.player.setDepth(DEPTH_PLAYER)
-    this.player.setCollideWorldBounds(true)
+    this.hero = new Hero(this, 0, 0)
 
-    const body = this.player.body as Phaser.Physics.Arcade.Body
-    body.setSize(28, 28)
-    body.setOffset((HERO_W - 28) / 2, HERO_H - 28 - 8)
-
-    this.cameras.main.startFollow(this.player, true, 0.12, 0.12)
-    this.createHeroAnims()
+    this.cameras.main.startFollow(this.hero, true, 0.12, 0.12)
     this.createEnemyAnims()
 
     this.mapNameUI = new MapNameUI(this)
@@ -129,7 +97,7 @@ export class GameScene extends Phaser.Scene {
     this.inventory.setOnChanged(() => this.save.requestSave())
     this.world.setOnChanged(() => this.save.requestSave())
 
-    this.mapRuntime = new MapRuntime(this, this.player, {
+    this.mapRuntime = new MapRuntime(this, this.hero, {
       onChanged: () => {
         this.health?.onMapChanged?.()
         this.updateCheckpoint()
@@ -141,32 +109,31 @@ export class GameScene extends Phaser.Scene {
       canWarp: () => (typeof this.health?.canWarp === 'function' ? this.health.canWarp() : true),
     })
     const debugHitbox = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('debugHitbox')
-    this.combat = new CombatSystem(this, this.player, {
-      getFacing: () => this.facing,
+    this.combat = new CombatSystem(this, this.hero, {
+      getFacing: () => this.hero.getFacing(),
       getEnemyGroup: () => this.mapRuntime.enemies,
       getWeapon: () => this.inventory.getWeaponDef(),
       debugHitbox,
     })
-    this.combat.bindInput(keyboard)
 
-    this.health = new PlayerHealthSystem(this, this.player, () => this.mapRuntime.enemies)
+    this.health = new PlayerHealthSystem(this, this.hero, () => this.mapRuntime.enemies)
     this.health.onMapChanged()
 
-    this.pickups = new PickupSystem(this, this.player, { inventory: this.inventory, health: this.health, world: this.world })
+    this.pickups = new PickupSystem(this, this.hero, { inventory: this.inventory, health: this.health, world: this.world })
     // LootSystem listens for enemy death events and spawns drops via PickupSystem.
     new LootSystem(this, this.pickups)
     this.interactions = new InteractionSystem(
       this,
-      this.player,
+      this.hero,
       { inventory: this.inventory, world: this.world, dialogue: this.dialogueUI, prompt: this.promptUI },
       { onDialogueOpen: () => this.pauseForDialogue(), onDialogueClose: () => this.resumeFromDialogue() },
     )
     this.mapRuntime.setPickupSystem(this.pickups)
     this.mapRuntime.setInteractionSystem(this.interactions)
 
-    this.enemyAI = new EnemyAISystem(this.player, () => this.mapRuntime.enemies)
+    this.enemyAI = new EnemyAISystem(this.hero, () => this.mapRuntime.enemies)
 
-    this.minimap = new MinimapUI(this, this.player, {
+    this.minimap = new MinimapUI(this, this.hero, {
       getMapKey: () => this.mapRuntime.mapKey,
       getMapSizeTiles: () => this.mapRuntime.getMapSizeTiles(),
       isTileBlocked: (tx, ty) => this.mapRuntime.isTileBlocked(tx, ty),
@@ -186,14 +153,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   update() {
+    this.minimap?.update?.()
+
     if (this.startMenu) {
       if (this.startBusy) return
-      if (Phaser.Input.Keyboard.JustDown(this.keyN)) {
+      if (this.controls.justPressed('newGame')) {
         void this.startNewGame()
         return
       }
       if (this.startLoading) return
-      if (Phaser.Input.Keyboard.JustDown(this.keyEnter)) {
+      if (this.controls.justPressed('confirm')) {
         if (this.startCanContinue) void this.continueGame()
         else void this.startNewGame()
         return
@@ -202,68 +171,52 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (this.gameOver) {
-      if (Phaser.Input.Keyboard.JustDown(this.keyEnter)) this.respawn()
+      if (this.controls.justPressed('confirm')) this.respawn()
       return
     }
 
+    const interactPressed = this.controls.justPressed('interact')
     if (!this.paused) this.interactions.update()
+    if (interactPressed && (!this.paused || this.interactions.isDialogueOpen())) this.interactions.tryInteract()
     if (this.interactions.isDialogueOpen()) return
 
-    if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
+    if (this.controls.justPressed('pause')) {
       if (this.paused) this.setPaused(false)
       else this.setPaused(true, 'pause')
       this.refreshDbg()
     }
 
-    if (Phaser.Input.Keyboard.JustDown(this.keyI)) {
+    if (this.controls.justPressed('inventory')) {
       if (this.paused && this.pauseMode === 'inventory') this.setPaused(false)
       else this.setPaused(true, 'inventory')
       this.refreshDbg()
     }
 
-    if (Phaser.Input.Keyboard.JustDown(this.keyM)) {
+    if (this.controls.justPressed('map')) {
       if (this.paused && this.pauseMode === 'map') this.setPaused(false)
       else this.setPaused(true, 'map')
       this.refreshDbg()
     }
 
-    if (Phaser.Input.Keyboard.JustDown(this.key1)) {
+    if (this.controls.justPressed('weapon1')) {
       if (this.inventory.equipWeapon('sword')) {
         if (this.paused && this.pauseMode === 'inventory') this.overlay.showInventory(this.inventory.getInventoryLines())
         this.refreshDbg()
       }
     }
-    if (Phaser.Input.Keyboard.JustDown(this.key2)) {
+    if (this.controls.justPressed('weapon2')) {
       if (this.inventory.equipWeapon('greatsword')) {
         if (this.paused && this.pauseMode === 'inventory') this.overlay.showInventory(this.inventory.getInventoryLines())
         this.refreshDbg()
       }
     }
 
-    this.minimap?.update?.()
-
     if (this.paused) return
 
-    const left = !!this.cursors.left?.isDown || !!this.wasd.left?.isDown
-    const right = !!this.cursors.right?.isDown || !!this.wasd.right?.isDown
-    const up = !!this.cursors.up?.isDown || !!this.wasd.up?.isDown
-    const down = !!this.cursors.down?.isDown || !!this.wasd.down?.isDown
+    if (this.controls.justPressed('attack')) this.combat.tryAttack()
 
-    const vx = (right ? 1 : 0) - (left ? 1 : 0)
-    const vy = (down ? 1 : 0) - (up ? 1 : 0)
-
-    const vec = new Phaser.Math.Vector2(vx, vy).normalize()
-    this.player.setVelocity(vec.x * this.speed, vec.y * this.speed)
-
-    const moving = vx !== 0 || vy !== 0
-    if (moving) {
-      if (vx !== 0) this.facing = vx > 0 ? 'right' : 'left'
-      else this.facing = vy > 0 ? 'down' : 'up'
-      this.player.anims.play(`hero-walk-${this.facing}`, true)
-    } else {
-      this.player.anims.stop()
-      this.player.setFrame(this.frameFor(this.facing, 0))
-    }
+    const { vx, vy } = this.controls.getMoveAxes()
+    this.hero.applyMovement(vx, vy, this.speed)
 
     this.health.update()
     this.pickups.update()
@@ -272,25 +225,7 @@ export class GameScene extends Phaser.Scene {
       this.refreshDbg()
       return
     }
-    this.combat.update()
     this.enemyAI.update(this.time.now)
-  }
-
-  private createHeroAnims() {
-    const facings: Facing[] = ['down', 'up', 'left', 'right']
-    for (const facing of facings) {
-      this.anims.create({
-        key: `hero-walk-${facing}`,
-        frames: [
-          { key: 'hero', frame: this.frameFor(facing, 0) },
-          { key: 'hero', frame: this.frameFor(facing, 1) },
-          { key: 'hero', frame: this.frameFor(facing, 2) },
-          { key: 'hero', frame: this.frameFor(facing, 1) },
-        ],
-        frameRate: 10,
-        repeat: -1,
-      })
-    }
   }
 
   private createEnemyAnims() {
@@ -312,18 +247,16 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private frameFor(facing: Facing, step: 0 | 1 | 2) {
-    const rowByFacing: Record<Facing, number> = { down: 0, up: 1, left: 2, right: 3 }
-    return rowByFacing[facing] * 3 + step
-  }
-
   private refreshDbg() {
     const rawEnemies = this.mapRuntime.enemies?.getChildren?.() ?? []
     ;(window as any).__dbg = {
-      player: this.player,
+      player: this.hero,
       mapKey: this.mapRuntime.mapKey,
       spawnName: this.mapRuntime.spawnName,
-      facing: this.facing,
+      facing: this.hero.getFacing(),
+      setFacing: (facing: string) => {
+        if (facing === 'up' || facing === 'down' || facing === 'left' || facing === 'right') this.hero.setFacing(facing)
+      },
       hasSave: () => this.save?.hasSave?.() ?? false,
       saveNow: () => this.save?.saveNow?.() ?? false,
       clearSave: () => this.save?.clear?.(),
@@ -369,7 +302,7 @@ export class GameScene extends Phaser.Scene {
       respawn: () => this.respawn(),
       depths: {
         ground: this.mapRuntime.groundDepth,
-        player: this.player.depth,
+        player: this.hero.depth,
       },
     }
   }
@@ -386,7 +319,7 @@ export class GameScene extends Phaser.Scene {
     this.pauseMode = mode
 
     if (this.paused) {
-      this.player.setVelocity(0, 0)
+      this.hero.setVelocity(0, 0)
       this.physics.world.pause()
       this.anims.pauseAll()
 
@@ -400,7 +333,7 @@ export class GameScene extends Phaser.Scene {
         this.overlay.showInventory(this.inventory.getInventoryLines())
       } else {
         this.minimap?.setMapVisible?.(false)
-        this.overlay.showPause(['ESC: Resume', 'I: Inventory'])
+        this.overlay.showPause(['ESC: Resume', 'I: Inventory', 'M: Map'])
       }
     } else {
       // Dialogue may have paused the world separately.
@@ -419,7 +352,7 @@ export class GameScene extends Phaser.Scene {
     if (this.paused) return
     if (this.gameOver) return
     this.dialoguePaused = true
-    this.player.setVelocity(0, 0)
+    this.hero.setVelocity(0, 0)
     this.physics.world.pause()
     this.anims.pauseAll()
   }
@@ -440,7 +373,7 @@ export class GameScene extends Phaser.Scene {
     this.pauseMode = 'pause'
     this.dialoguePaused = false
 
-    this.player.setVelocity(0, 0)
+    this.hero.setVelocity(0, 0)
     this.physics.world.pause()
     this.anims.pauseAll()
     this.overlay.showGameOver(['Press ENTER to respawn at last checkpoint.'])
@@ -486,7 +419,7 @@ export class GameScene extends Phaser.Scene {
     this.pauseMode = 'pause'
     this.gameOver = false
     this.dialoguePaused = false
-    this.player.setVelocity(0, 0)
+    this.hero.setVelocity(0, 0)
     this.physics.world.pause()
     this.anims.pauseAll()
     this.minimap?.setMiniVisible?.(false)
@@ -512,7 +445,7 @@ export class GameScene extends Phaser.Scene {
       lines.push('ENTER: New Game')
     }
     lines.push('')
-    lines.push('WASD: Move   SPACE: Attack   E: Interact   I: Inventory')
+    lines.push('WASD: Move   SPACE: Attack   E: Interact   I: Inventory   M: Map')
     this.overlay.showStart(lines)
     this.refreshDbg()
   }
@@ -571,7 +504,7 @@ export class GameScene extends Phaser.Scene {
     this.minimap?.setMiniVisible?.(true)
 
     // Load while paused, then resume.
-    this.player.setVelocity(0, 0)
+    this.hero.setVelocity(0, 0)
     this.physics.world.pause()
     this.anims.pauseAll()
 
