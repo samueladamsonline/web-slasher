@@ -4,7 +4,7 @@
   "width": 25,
   "infinite": false,
   "nextlayerid": 3,
-  "nextobjectid": 5,
+  "nextobjectid": 7,
   "orientation": "orthogonal",
   "renderorder": "right-down",
   "tiledversion": "1.10.2",
@@ -499,6 +499,35 @@
               "name": "hp",
               "type": "int",
               "value": 3
+            },
+            {
+              "name": "kind",
+              "type": "string",
+              "value": "slime"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "name": "bat_1",
+          "type": "enemy",
+          "x": 736,
+          "y": 416,
+          "width": 0,
+          "height": 0,
+          "rotation": 0,
+          "visible": true,
+          "point": true,
+          "properties": [
+            {
+              "name": "kind",
+              "type": "string",
+              "value": "bat"
+            },
+            {
+              "name": "hp",
+              "type": "int",
+              "value": 2
             }
           ]
         }

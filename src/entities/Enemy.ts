@@ -96,7 +96,8 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     const props = (obj.properties ?? []) as TiledProps
 
     const kindRaw = getProp(props, 'kind')
-    const kind = (kindRaw === 'slime' ? 'slime' : 'slime') as EnemyKind
+    const kind =
+      typeof kindRaw === 'string' && kindRaw in ENEMIES ? (kindRaw as EnemyKind) : ('slime' as EnemyKind)
 
     const def = ENEMIES[kind]
     const hpRaw = getProp(props, 'hp')
@@ -105,4 +106,3 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     return new Enemy(scene, obj.x, obj.y, def, hp)
   }
 }
-

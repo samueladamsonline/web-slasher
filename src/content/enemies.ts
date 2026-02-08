@@ -1,4 +1,4 @@
-export type EnemyKind = 'slime'
+export type EnemyKind = 'slime' | 'bat'
 
 export type EnemyDef = {
   kind: EnemyKind
@@ -18,5 +18,12 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
     knockback: 220,
     body: { w: 34, h: 22, ox: (44 - 34) / 2, oy: 34 - 22 - 4 },
   },
+  bat: {
+    kind: 'bat',
+    texture: 'bat',
+    hp: 2,
+    invulnMs: 180,
+    knockback: 280,
+    body: { w: 34, h: 18, ox: (64 - 34) / 2, oy: 48 - 18 - 10 },
+  },
 }
-

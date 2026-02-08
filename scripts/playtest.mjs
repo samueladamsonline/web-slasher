@@ -74,6 +74,28 @@ async function pushIntoEnemyAndMeasureDrift(page, enemyX, enemyY) {
   return { x: enemies[0].x, y: enemies[0].y }
 }
 
+async function slashEnemyAndGetHpDelta(page, enemy) {
+  await teleportPlayer(page, enemy.x - 42, enemy.y)
+  await page.waitForTimeout(100)
+  await page.keyboard.down('d')
+  await page.waitForTimeout(80)
+  await page.keyboard.up('d')
+  await page.waitForTimeout(60)
+
+  const before = await getEnemies(page)
+  const beforeEnemy = Array.isArray(before) ? before.find((e) => e.kind === enemy.kind) : null
+  const hp0 = beforeEnemy?.hp
+
+  await page.keyboard.press('Space')
+  await page.waitForTimeout(250)
+
+  const after = await getEnemies(page)
+  const afterEnemy = Array.isArray(after) ? after.find((e) => e.kind === enemy.kind) : null
+  const hp1 = afterEnemy?.hp
+
+  return { hp0, hp1, before, after }
+}
+
 async function waitForMapKey(page, expected, timeoutMs = 2500) {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
@@ -194,39 +216,38 @@ try {
 
   // Combat sanity: enemy exists and can be damaged with Space.
   const enemies0 = await getEnemies(page)
-  if (!Array.isArray(enemies0) || enemies0.length < 1) errors.push(`expected at least 1 enemy; got ${JSON.stringify(enemies0)}`)
+  if (!Array.isArray(enemies0) || enemies0.length < 2) errors.push(`expected at least 2 enemies; got ${JSON.stringify(enemies0)}`)
   else {
-    const e0 = enemies0[0]
-    const driftPos = await pushIntoEnemyAndMeasureDrift(page, e0.x, e0.y)
+    const slime = enemies0.find((e) => e.kind === 'slime')
+    const bat = enemies0.find((e) => e.kind === 'bat')
+    if (!slime || !bat) errors.push(`expected both slime and bat; got ${JSON.stringify(enemies0)}`)
+
+    const first = enemies0[0]
+    const driftPos = await pushIntoEnemyAndMeasureDrift(page, first.x, first.y)
     if (driftPos) {
-      const drift = Math.hypot(driftPos.x - e0.x, driftPos.y - e0.y)
+      const drift = Math.hypot(driftPos.x - first.x, driftPos.y - first.y)
       if (drift > 12) errors.push(`enemy drifted too much from player collision push; drift=${drift.toFixed(2)}px`)
     }
-    await teleportPlayer(page, e0.x - 42, e0.y)
-    await page.waitForTimeout(100)
-    // Face right so the hitbox is created over the enemy.
-    await page.keyboard.down('d')
-    await page.waitForTimeout(80)
-    await page.keyboard.up('d')
-    await page.waitForTimeout(60)
-    // Slash a few times to exercise enemy death + delayed knockback timers.
+
+    if (slime) {
+      const { hp0, hp1, before, after } = await slashEnemyAndGetHpDelta(page, slime)
+      if (!(typeof hp0 === 'number' && typeof hp1 === 'number')) errors.push(`expected numeric slime hp; before=${JSON.stringify(before)} after=${JSON.stringify(after)}`)
+      else if (hp1 >= hp0) errors.push(`expected slime hp drop; before=${hp0} after=${hp1}`)
+    }
+
+    if (bat) {
+      const { hp0, hp1, before, after } = await slashEnemyAndGetHpDelta(page, bat)
+      if (!(typeof hp0 === 'number' && typeof hp1 === 'number')) errors.push(`expected numeric bat hp; before=${JSON.stringify(before)} after=${JSON.stringify(after)}`)
+      else if (hp1 >= hp0) errors.push(`expected bat hp drop; before=${hp0} after=${hp1}`)
+    }
+
+    // Exercise death + delayed timers (spam attacks).
     for (let i = 0; i < 5; i++) {
       await page.keyboard.press('Space')
       await page.waitForTimeout(180)
     }
     const lastAttack = await getLastAttack(page)
     if (!lastAttack || typeof lastAttack.hits !== 'number') errors.push(`expected __dbg.lastAttack.hits; got ${JSON.stringify(lastAttack)}`)
-    const enemies1 = await getEnemies(page)
-    const hp0 = e0.hp
-    const hp1 = Array.isArray(enemies1) && enemies1.length ? enemies1[0].hp : null
-    if (typeof hp0 !== 'number') errors.push(`expected numeric enemy hp before; got ${JSON.stringify(enemies0)}`)
-    else if (Array.isArray(enemies1) && enemies1.length === 0) {
-      // Enemy died, that's fine.
-    } else if (typeof hp1 !== 'number') {
-      errors.push(`expected numeric enemy hp after; got ${JSON.stringify(enemies1)}`)
-    } else if (hp1 >= hp0) {
-      errors.push(`expected enemy hp to drop; before=${hp0} after=${hp1}; lastAttack=${JSON.stringify(lastAttack)}`)
-    }
   }
 
   // Warp zones are 64x64 at x=1280..1344, y=768..832 in both maps (see map JSON).
