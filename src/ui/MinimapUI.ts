@@ -68,7 +68,7 @@ export class MinimapUI {
       .text(0, 0, 'MAP', { fontFamily: 'Georgia, serif', fontSize: '26px', color: '#f4f2ec' })
       .setOrigin(0.5, 0.5)
     this.mapHint = scene.add
-      .text(0, 0, 'M: Close', { fontFamily: 'Georgia, serif', fontSize: '14px', color: '#d7d3c8' })
+      .text(0, 0, 'M or ESC: Close', { fontFamily: 'Georgia, serif', fontSize: '14px', color: '#d7d3c8' })
       .setOrigin(0.5, 0.5)
     this.mapG = scene.add.graphics()
     this.mapContainer = scene.add.container(0, 0, [this.mapDim, this.mapPanel, this.mapTitle, this.mapHint, this.mapG])
