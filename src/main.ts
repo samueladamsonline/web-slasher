@@ -25,6 +25,8 @@ const HERO_H = 72
 
 type Facing = 'down' | 'up' | 'left' | 'right'
 
+type MapKey = 'overworld' | 'cave'
+
 class GameScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
   private wasd!: { up: Phaser.Input.Keyboard.Key; down: Phaser.Input.Keyboard.Key; left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key }
@@ -32,31 +34,19 @@ class GameScene extends Phaser.Scene {
   private speed = 240
   private facing: Facing = 'down'
 
+  private currentMapKey: MapKey = 'overworld'
+  private map?: Phaser.Tilemaps.Tilemap
+  private groundLayer?: Phaser.Tilemaps.TilemapLayer
+  private groundCollider?: Phaser.Physics.Arcade.Collider
+  private warpZones: Phaser.GameObjects.Zone[] = []
+  private warpOverlaps: Phaser.Physics.Arcade.Collider[] = []
+  private transitioning = false
+
   constructor() {
     super('game')
   }
 
   preload() {
-    // Generate simple HD-style textures at runtime (placeholder tile art).
-    const g = this.add.graphics()
-
-    g.fillStyle(0x2f8f2f, 1)
-    g.fillRoundedRect(0, 0, TILE_SIZE, TILE_SIZE, 8)
-    g.generateTexture('tile-grass', TILE_SIZE, TILE_SIZE)
-    g.clear()
-
-    g.fillStyle(0x7a5a3a, 1)
-    g.fillRoundedRect(0, 0, TILE_SIZE, TILE_SIZE, 10)
-    g.generateTexture('tile-dirt', TILE_SIZE, TILE_SIZE)
-    g.clear()
-
-    g.fillStyle(0x2d2d2d, 1)
-    g.fillRoundedRect(0, 0, TILE_SIZE, TILE_SIZE, 12)
-    g.generateTexture('tile-rock', TILE_SIZE, TILE_SIZE)
-    g.clear()
-
-    g.destroy()
-
     // Real sprite pipeline: load a spritesheet from /public.
     // Layout: 3 columns (walk frames), 4 rows (down, up, left, right).
     this.load.spritesheet('hero', '/sprites/hero.png', { frameWidth: HERO_W, frameHeight: HERO_H })
@@ -64,6 +54,7 @@ class GameScene extends Phaser.Scene {
     // Tilemap pipeline (Tiled JSON + tileset image in /public).
     this.load.image('overworldTiles', '/tilesets/overworld.png')
     this.load.tilemapTiledJSON('overworld', '/maps/overworld.json')
+    this.load.tilemapTiledJSON('cave', '/maps/cave.json')
   }
 
   create() {
@@ -76,40 +67,22 @@ class GameScene extends Phaser.Scene {
       right: Phaser.Input.Keyboard.KeyCodes.D,
     }) as { up: Phaser.Input.Keyboard.Key; down: Phaser.Input.Keyboard.Key; left: Phaser.Input.Keyboard.Key; right: Phaser.Input.Keyboard.Key }
 
-    const map = this.make.tilemap({ key: 'overworld' })
-    const tileset = map.addTilesetImage('overworld', 'overworldTiles')
-    if (!tileset) throw new Error('Failed to create tileset. Check tileset name in Tiled JSON.')
-
-    const ground = map.createLayer('Ground', tileset, 0, 0)
-    if (!ground) throw new Error('Failed to create Ground layer. Check layer name in Tiled JSON.')
-
-    // Rock tiles in the tileset are marked with `collides: true` in the Tiled JSON.
-    ground.setCollisionByProperty({ collides: true })
-
-    // Important: Arcade Physics world bounds default to the canvas size.
-    // Set bounds to map size to avoid invisible walls.
-    this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
-    this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
-
-    const spawn = map.findObject('Objects', (o) => o.name === 'player_spawn')
-    const spawnX = spawn?.x ?? TILE_SIZE * 5 + TILE_SIZE / 2
-    const spawnY = spawn?.y ?? TILE_SIZE * 5 + TILE_SIZE / 2
-
-    this.player = this.physics.add.sprite(spawnX, spawnY, 'hero', this.frameFor(this.facing, 0))
+    // Create the player once and keep it across map loads.
+    this.player = this.physics.add.sprite(0, 0, 'hero', this.frameFor(this.facing, 0))
     this.player.setOrigin(0.5, 0.8)
     this.player.setCollideWorldBounds(true)
     const body = this.player.body as Phaser.Physics.Arcade.Body
     body.setSize(28, 28)
     body.setOffset((HERO_W - 28) / 2, HERO_H - 28 - 8)
 
-    this.physics.add.collider(this.player, ground)
-
     this.cameras.main.startFollow(this.player, true, 0.12, 0.12)
 
     this.createHeroAnims()
 
+    this.loadMap('overworld', 'player_spawn')
+
     // Expose a tiny bit of state for automated playtests (and debugging).
-    ;(window as any).__dbg = { player: this.player }
+    this.refreshDbg()
 
     this.add
       .text(24, 24, 'Top-Down RPG Starter', {
@@ -120,6 +93,95 @@ class GameScene extends Phaser.Scene {
         padding: { left: 12, right: 12, top: 8, bottom: 8 },
       })
       .setScrollFactor(0)
+  }
+
+  private loadMap(mapKey: MapKey, spawnName: string) {
+    this.destroyCurrentMap()
+
+    this.currentMapKey = mapKey
+    const map = this.make.tilemap({ key: mapKey })
+    const tileset = map.addTilesetImage('overworld', 'overworldTiles')
+    if (!tileset) throw new Error('Failed to create tileset. Check tileset name in Tiled JSON.')
+
+    const ground = map.createLayer('Ground', tileset, 0, 0)
+    if (!ground) throw new Error('Failed to create Ground layer. Check layer name in Tiled JSON.')
+
+    ground.setCollisionByProperty({ collides: true })
+
+    this.map = map
+    this.groundLayer = ground
+
+    this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
+    this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
+
+    const spawn = map.findObject('Objects', (o) => o.name === spawnName)
+    const spawnX = spawn?.x ?? TILE_SIZE * 5 + TILE_SIZE / 2
+    const spawnY = spawn?.y ?? TILE_SIZE * 5 + TILE_SIZE / 2
+
+    const body = this.player.body as Phaser.Physics.Arcade.Body
+    body.reset(spawnX, spawnY)
+    this.player.setVelocity(0, 0)
+
+    this.groundCollider = this.physics.add.collider(this.player, ground)
+
+    this.installWarps(map)
+
+    this.refreshDbg()
+  }
+
+  private destroyCurrentMap() {
+    for (const o of this.warpOverlaps) o.destroy()
+    this.warpOverlaps = []
+
+    for (const z of this.warpZones) z.destroy()
+    this.warpZones = []
+
+    this.groundCollider?.destroy()
+    this.groundCollider = undefined
+
+    this.groundLayer?.destroy()
+    this.groundLayer = undefined
+
+    this.map?.destroy()
+    this.map = undefined
+  }
+
+  private installWarps(map: Phaser.Tilemaps.Tilemap) {
+    const layer = map.getObjectLayer('Objects')
+    const objects = layer?.objects ?? []
+
+    for (const o of objects) {
+      if (o.type !== 'warp') continue
+      if (typeof o.x !== 'number' || typeof o.y !== 'number') continue
+      if (typeof o.width !== 'number' || typeof o.height !== 'number') continue
+      if (o.width <= 0 || o.height <= 0) continue
+
+      const props = (o.properties ?? []) as any[]
+      const toMap = props.find((p) => p?.name === 'toMap')?.value
+      const toSpawn = props.find((p) => p?.name === 'toSpawn')?.value
+      if (typeof toMap !== 'string' || !toMap) continue
+
+      const zone = this.add.zone(o.x + o.width / 2, o.y + o.height / 2, o.width, o.height)
+      this.physics.add.existing(zone, true)
+      this.warpZones.push(zone)
+
+      const overlap = this.physics.add.overlap(this.player, zone, () => {
+        if (this.transitioning) return
+        this.transitioning = true
+
+        // Small delay avoids edge cases where the overlap fires repeatedly in the same step.
+        this.time.delayedCall(60, () => {
+          this.loadMap(toMap as MapKey, typeof toSpawn === 'string' && toSpawn ? toSpawn : 'player_spawn')
+          this.time.delayedCall(250, () => (this.transitioning = false))
+        })
+      })
+
+      this.warpOverlaps.push(overlap)
+    }
+  }
+
+  private refreshDbg() {
+    ;(window as any).__dbg = { player: this.player, mapKey: this.currentMapKey }
   }
 
   private createHeroAnims() {

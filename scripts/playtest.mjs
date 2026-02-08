@@ -45,6 +45,20 @@ async function getPlayerPos(page) {
   })
 }
 
+async function getMapKey(page) {
+  return await page.evaluate(() => globalThis.__dbg?.mapKey ?? null)
+}
+
+async function waitForMapKey(page, expected, timeoutMs = 2500) {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const key = await getMapKey(page)
+    if (key === expected) return
+    await page.waitForTimeout(100)
+  }
+  throw new Error(`timed out waiting for mapKey=${expected}; last=${await getMapKey(page)}`)
+}
+
 async function teleportPlayer(page, x, y) {
   await page.evaluate(
     ({ x, y }) => {
@@ -142,6 +156,27 @@ try {
   await page.keyboard.up('d')
   const afterRockPush = await getPlayerPos(page)
   if (afterRockPush && afterRockPush.x > 420) errors.push(`expected rock collision to block; afterRockPush.x=${afterRockPush.x}`)
+
+  // Warp sanity: overworld -> cave -> overworld
+  const initialMapKey = await getMapKey(page)
+  if (initialMapKey !== 'overworld') errors.push(`expected initial mapKey=overworld; got ${initialMapKey}`)
+
+  // Warp zones are 64x64 at x=1280..1344, y=768..832 in both maps (see map JSON).
+  await teleportPlayer(page, 1312, 800)
+  await page.waitForTimeout(200)
+  try {
+    await waitForMapKey(page, 'cave', 3000)
+  } catch (e) {
+    errors.push(`expected warp to cave; ${String(e?.message ?? e)}`)
+  }
+
+  await teleportPlayer(page, 1312, 800)
+  await page.waitForTimeout(200)
+  try {
+    await waitForMapKey(page, 'overworld', 3000)
+  } catch (e) {
+    errors.push(`expected warp back to overworld; ${String(e?.message ?? e)}`)
+  }
 
   const canvasCount = await page.locator('canvas').count()
   if (canvasCount < 1) errors.push('no canvas element found')
