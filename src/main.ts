@@ -28,6 +28,7 @@ type Facing = 'down' | 'up' | 'left' | 'right'
 type MapKey = 'overworld' | 'cave'
 
 const DEPTH_GROUND = 0
+const DEPTH_WARP = 5
 const DEPTH_PLAYER = 10
 const DEPTH_UI = 1000
 
@@ -43,6 +44,7 @@ class GameScene extends Phaser.Scene {
   private groundLayer?: Phaser.Tilemaps.TilemapLayer
   private groundCollider?: Phaser.Physics.Arcade.Collider
   private warpZones: Phaser.GameObjects.Zone[] = []
+  private warpIndicators: Phaser.GameObjects.GameObject[] = []
   private warpOverlaps: Phaser.Physics.Arcade.Collider[] = []
   private transitioning = false
 
@@ -145,6 +147,12 @@ class GameScene extends Phaser.Scene {
     for (const z of this.warpZones) z.destroy()
     this.warpZones = []
 
+    for (const i of this.warpIndicators) {
+      this.tweens.killTweensOf(i)
+      i.destroy()
+    }
+    this.warpIndicators = []
+
     this.groundCollider?.destroy()
     this.groundCollider = undefined
 
@@ -174,6 +182,9 @@ class GameScene extends Phaser.Scene {
       this.physics.add.existing(zone, true)
       this.warpZones.push(zone)
 
+      // Visual indicator: make warp zones obvious without needing special tiles.
+      this.warpIndicators.push(...this.makeWarpIndicator(zone.x, zone.y, o.width, o.height))
+
       const overlap = this.physics.add.overlap(this.player, zone, () => {
         if (this.transitioning) return
         this.transitioning = true
@@ -187,6 +198,76 @@ class GameScene extends Phaser.Scene {
 
       this.warpOverlaps.push(overlap)
     }
+  }
+
+  private makeWarpIndicator(x: number, y: number, w: number, h: number) {
+    const rect = this.add
+      .rectangle(x, y, w, h, 0x00d0ff, 0.18)
+      .setStrokeStyle(3, 0x76fff8, 0.75)
+      .setDepth(DEPTH_WARP)
+
+    const label = this.add
+      .text(x, y - h / 2 - 18, 'WARP', {
+        fontFamily: 'Georgia, serif',
+        fontSize: '16px',
+        color: '#eaffff',
+        backgroundColor: 'rgba(0,0,0,0.35)',
+        padding: { left: 8, right: 8, top: 4, bottom: 4 },
+      })
+      .setOrigin(0.5, 0.5)
+      .setDepth(DEPTH_WARP)
+
+    const diamond = this.add.graphics().setDepth(DEPTH_WARP)
+    diamond.lineStyle(4, 0x76fff8, 0.85)
+    diamond.fillStyle(0x00d0ff, 0.08)
+    const r = Math.min(w, h) * 0.22
+    diamond.fillPoints(
+      [
+        { x, y: y - r },
+        { x: x + r, y },
+        { x, y: y + r },
+        { x: x - r, y },
+      ],
+      true,
+    )
+    diamond.strokePoints(
+      [
+        { x, y: y - r },
+        { x: x + r, y },
+        { x, y: y + r },
+        { x: x - r, y },
+      ],
+      true,
+    )
+
+    this.tweens.add({
+      targets: rect,
+      alpha: { from: 0.12, to: 0.28 },
+      duration: 650,
+      yoyo: true,
+      repeat: -1,
+      ease: 'sine.inOut',
+    })
+
+    this.tweens.add({
+      targets: label,
+      alpha: { from: 0.6, to: 1 },
+      duration: 850,
+      yoyo: true,
+      repeat: -1,
+      ease: 'sine.inOut',
+    })
+
+    this.tweens.add({
+      targets: diamond,
+      angle: { from: -3, to: 3 },
+      duration: 900,
+      yoyo: true,
+      repeat: -1,
+      ease: 'sine.inOut',
+    })
+
+    return [rect, label, diamond]
   }
 
   private refreshDbg() {
