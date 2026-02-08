@@ -23,6 +23,8 @@ export class GameScene extends Phaser.Scene {
   private keyEsc!: Phaser.Input.Keyboard.Key
   private keyI!: Phaser.Input.Keyboard.Key
   private keyEnter!: Phaser.Input.Keyboard.Key
+  private key1!: Phaser.Input.Keyboard.Key
+  private key2!: Phaser.Input.Keyboard.Key
 
   private player!: Phaser.Physics.Arcade.Sprite
   private speed = 240
@@ -77,6 +79,8 @@ export class GameScene extends Phaser.Scene {
     this.keyEsc = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC)
     this.keyI = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I)
     this.keyEnter = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER)
+    this.key1 = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ONE)
+    this.key2 = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TWO)
 
     this.player = this.physics.add.sprite(0, 0, 'hero', this.frameFor(this.facing, 0))
     this.player.setOrigin(0.5, 0.8)
@@ -112,7 +116,7 @@ export class GameScene extends Phaser.Scene {
     this.combat = new CombatSystem(this, this.player, {
       getFacing: () => this.facing,
       getEnemyGroup: () => this.mapRuntime.enemies,
-      canAttack: () => this.inventory.getWeapon() !== null,
+      getWeapon: () => this.inventory.getWeaponDef(),
       debugHitbox,
     })
     this.combat.bindInput(keyboard)
@@ -160,6 +164,19 @@ export class GameScene extends Phaser.Scene {
       if (this.paused && this.pauseMode === 'inventory') this.setPaused(false)
       else this.setPaused(true, 'inventory')
       this.refreshDbg()
+    }
+
+    if (Phaser.Input.Keyboard.JustDown(this.key1)) {
+      if (this.inventory.equipWeapon('sword')) {
+        if (this.paused && this.pauseMode === 'inventory') this.overlay.showInventory(this.inventory.getInventoryLines())
+        this.refreshDbg()
+      }
+    }
+    if (Phaser.Input.Keyboard.JustDown(this.key2)) {
+      if (this.inventory.equipWeapon('greatsword')) {
+        if (this.paused && this.pauseMode === 'inventory') this.overlay.showInventory(this.inventory.getInventoryLines())
+        this.refreshDbg()
+      }
     }
 
     if (this.paused) return
@@ -247,6 +264,10 @@ export class GameScene extends Phaser.Scene {
       getLastAttack: () => this.combat?.getDebug?.() ?? { at: 0, hits: 0 },
       tryAttack: () => this.combat?.tryAttack?.(),
       tryInteract: () => this.interactions?.tryInteract?.(),
+      equipWeapon: (id: string) => {
+        if (id === 'sword' || id === 'greatsword') return this.inventory?.equipWeapon?.(id)
+        return false
+      },
       getPlayerHp: () => this.health?.getHp?.() ?? null,
       getPlayerMaxHp: () => this.health?.getMaxHp?.() ?? null,
       setPlayerHp: (hp: number) => this.health?.setHp?.(hp),

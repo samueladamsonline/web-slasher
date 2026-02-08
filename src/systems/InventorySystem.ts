@@ -1,18 +1,19 @@
 import type { ItemId } from '../content/items'
 import { ITEMS } from '../content/items'
-
-export type WeaponId = 'sword'
+import { WEAPONS, type WeaponDef, type WeaponId } from '../content/weapons'
 
 export type InventorySnapshot = {
   coins: number
   keys: number
   weapon: WeaponId | null
+  ownedWeapons: WeaponId[]
 }
 
 export class InventorySystem {
   private coins = 0
   private keys = 0
   private weapon: WeaponId | null = 'sword'
+  private ownedWeapons = new Set<WeaponId>(['sword', 'greatsword'])
 
   getCoins() {
     return this.coins
@@ -26,8 +27,28 @@ export class InventorySystem {
     return this.weapon
   }
 
+  getWeaponDef(): WeaponDef | null {
+    const id = this.weapon
+    return id ? WEAPONS[id] : null
+  }
+
+  hasWeapon(id: WeaponId) {
+    return this.ownedWeapons.has(id)
+  }
+
+  addWeapon(id: WeaponId) {
+    this.ownedWeapons.add(id)
+    if (!this.weapon) this.weapon = id
+  }
+
+  equipWeapon(id: WeaponId) {
+    if (!this.ownedWeapons.has(id)) return false
+    this.weapon = id
+    return true
+  }
+
   snapshot(): InventorySnapshot {
-    return { coins: this.coins, keys: this.keys, weapon: this.weapon }
+    return { coins: this.coins, keys: this.keys, weapon: this.weapon, ownedWeapons: [...this.ownedWeapons] }
   }
 
   addItem(id: ItemId, amount = 1) {
@@ -53,7 +74,10 @@ export class InventorySystem {
     lines.push('I: Close')
     lines.push('')
     lines.push('Equipment')
-    lines.push(`- Weapon: ${this.weapon ?? '(none)'}`)
+    const wd = this.getWeaponDef()
+    const weaponLabel = wd ? `${wd.name} (DMG ${wd.damage}, CD ${wd.cooldownMs}ms)` : '(none)'
+    lines.push(`- Weapon: ${weaponLabel}`)
+    lines.push('  1: Sword   2: Greatsword')
     lines.push('')
     lines.push('Items')
     lines.push(`- ${ITEMS.coin.name}: ${this.coins}`)

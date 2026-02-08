@@ -111,6 +111,10 @@ async function tryInteract(page) {
   await page.evaluate(() => globalThis.__dbg?.tryInteract?.())
 }
 
+async function equipWeapon(page, weaponId) {
+  await page.evaluate(({ weaponId }) => globalThis.__dbg?.equipWeapon?.(weaponId), { weaponId })
+}
+
 async function pushIntoEnemyAndMeasureDrift(page, enemyKind, enemyX, enemyY) {
   // Freeze the enemy so any measured drift is due to player pushing, not AI wander.
   await page.evaluate(({ kind }) => {
@@ -614,16 +618,32 @@ try {
       }
     }
 
-    if (slime) {
-      const { hp0, hp1, before, after, atk0, atk1 } = await slashEnemyAndGetHpDelta(page, 'slime')
-      if (!(typeof hp0 === 'number')) errors.push(`expected numeric slime hp; before=${JSON.stringify(before)} after=${JSON.stringify(after)}`)
-      else if (typeof hp1 === 'number') {
-        if (hp1 >= hp0) errors.push(`expected slime hp drop; before=${hp0} after=${hp1}; attack=${JSON.stringify({ atk0, atk1 })}`)
+    // Weapon stats sanity: swapping weapons should change damage output.
+    try {
+      await equipWeapon(page, 'sword')
+      const { hp0, hp1, before, after } = await slashEnemyAndGetHpDelta(page, 'slime')
+      if (!(typeof hp0 === 'number' && typeof hp1 === 'number'))
+        throw new Error(`expected numeric slime hp for sword test; before=${JSON.stringify(before)} after=${JSON.stringify(after)}`)
+      if (hp1 !== hp0 - 1) throw new Error(`expected sword damage=1; before=${hp0} after=${hp1}`)
+    } catch (e) {
+      errors.push(`expected sword weapon stats; ${String(e?.message ?? e)}`)
+    }
+
+    try {
+      await equipWeapon(page, 'greatsword')
+      const { hp0, hp1, before, after } = await slashEnemyAndGetHpDelta(page, 'bat')
+      if (!(typeof hp0 === 'number')) throw new Error(`expected numeric bat hp for greatsword test; before=${JSON.stringify(before)} after=${JSON.stringify(after)}`)
+      if (typeof hp1 === 'number') {
+        const expected = Math.max(0, hp0 - 2)
+        if (hp1 !== expected) throw new Error(`expected greatsword damage=2; before=${hp0} after=${hp1} expected=${expected}`)
       } else {
-        // Enemy may have been killed and removed.
-        const stillThere = Array.isArray(after) ? after.some((e) => e.kind === 'slime') : false
-        if (stillThere) errors.push(`expected slime to be killed or have hp; before=${hp0} afterHp=${hp1}`)
+        // If the bat was killed and removed, that's fine as long as it wasn't a higher HP enemy.
+        if (hp0 > 2) throw new Error(`expected bat to survive or report hp after hit; beforeHp=${hp0} after=${JSON.stringify(after)}`)
       }
+    } catch (e) {
+      errors.push(`expected greatsword weapon stats; ${String(e?.message ?? e)}`)
+    } finally {
+      await equipWeapon(page, 'sword')
     }
 
     // Loot sanity: killing an enemy should drop coins that auto-collect.
@@ -638,17 +658,6 @@ try {
       if (inv1.coins < inv0.coins + 1) throw new Error(`expected coin loot on enemy death; coins0=${inv0.coins} coins1=${inv1.coins}`)
     } catch (e) {
       errors.push(`expected loot drops; ${String(e?.message ?? e)}`)
-    }
-
-    if (bat) {
-      const { hp0, hp1, before, after, atk0, atk1 } = await slashEnemyAndGetHpDelta(page, 'bat')
-      if (!(typeof hp0 === 'number')) errors.push(`expected numeric bat hp; before=${JSON.stringify(before)} after=${JSON.stringify(after)}`)
-      else if (typeof hp1 === 'number') {
-        if (hp1 >= hp0) errors.push(`expected bat hp drop; before=${hp0} after=${hp1}; attack=${JSON.stringify({ atk0, atk1 })}`)
-      } else {
-        const stillThere = Array.isArray(after) ? after.some((e) => e.kind === 'bat') : false
-        if (stillThere) errors.push(`expected bat to be killed or have hp; before=${hp0} afterHp=${hp1}`)
-      }
     }
 
     // Exercise death + delayed timers (spam attacks).

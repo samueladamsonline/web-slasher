@@ -2,6 +2,7 @@ import * as Phaser from 'phaser'
 import { Enemy } from '../entities/Enemy'
 import { DEPTH_HITBOX } from '../game/constants'
 import type { Facing } from '../game/types'
+import type { WeaponDef, WeaponHitbox } from '../content/weapons'
 
 export type CombatDebug = { at: number; hits: number }
 
@@ -36,6 +37,32 @@ export class CombatSystem {
     g.generateTexture('sword', 64, 64)
     g.clear()
 
+    // Greatsword (chunkier).
+    g.fillStyle(0x3b2a1a, 1)
+    g.fillRoundedRect(10, 30, 18, 8, 4)
+    g.fillStyle(0xb08a5a, 1)
+    g.fillCircle(12, 34, 5)
+    g.fillStyle(0x1b1b1b, 0.75)
+    g.fillRoundedRect(22, 24, 8, 20, 4)
+
+    g.fillStyle(0xd9e3ee, 1)
+    g.fillRoundedRect(28, 30, 34, 8, 4)
+    g.fillStyle(0xffffff, 0.65)
+    g.fillRoundedRect(32, 32, 26, 2, 1)
+    g.fillStyle(0xb2c0cf, 0.85)
+    g.fillRoundedRect(32, 36, 26, 1, 1)
+    g.fillStyle(0xd9e3ee, 1)
+    g.fillTriangle(62, 30, 72, 34, 62, 38)
+
+    g.lineStyle(3, 0x0a0d12, 0.55)
+    g.strokeRoundedRect(28, 30, 34, 8, 4)
+    g.strokeRoundedRect(22, 24, 8, 20, 4)
+    g.strokeRoundedRect(10, 30, 18, 8, 4)
+    g.strokeTriangle(62, 30, 72, 34, 62, 38)
+
+    g.generateTexture('greatsword', 80, 64)
+    g.clear()
+
     // Slash trail.
     g.lineStyle(10, 0xfff2a8, 0.55)
     g.beginPath()
@@ -48,6 +75,20 @@ export class CombatSystem {
     g.lineTo(56, 18)
     g.strokePath()
     g.generateTexture('slash', 64, 64)
+    g.clear()
+
+    // Heavy slash.
+    g.lineStyle(14, 0xffd96b, 0.45)
+    g.beginPath()
+    g.moveTo(10, 56)
+    g.lineTo(58, 8)
+    g.strokePath()
+    g.lineStyle(7, 0xffffff, 0.22)
+    g.beginPath()
+    g.moveTo(14, 58)
+    g.lineTo(62, 14)
+    g.strokePath()
+    g.generateTexture('slash-heavy', 72, 72)
     g.clear()
 
     // Hit spark.
@@ -74,7 +115,7 @@ export class CombatSystem {
   private player: Phaser.Physics.Arcade.Sprite
   private getFacing: () => Facing
   private getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined
-  private canAttack?: () => boolean
+  private getWeapon?: () => WeaponDef | null
   private debugHitbox: boolean
 
   private attackLock = false
@@ -87,7 +128,7 @@ export class CombatSystem {
     opts: {
       getFacing: () => Facing
       getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined
-      canAttack?: () => boolean
+      getWeapon?: () => WeaponDef | null
       debugHitbox?: boolean
     },
   ) {
@@ -95,7 +136,7 @@ export class CombatSystem {
     this.player = player
     this.getFacing = opts.getFacing
     this.getEnemyGroup = opts.getEnemyGroup
-    this.canAttack = opts.canAttack
+    this.getWeapon = opts.getWeapon
     this.debugHitbox = !!opts.debugHitbox
   }
 
@@ -117,18 +158,18 @@ export class CombatSystem {
   }
 
   tryAttack() {
-    if (this.canAttack && !this.canAttack()) return
     if (this.attackLock) return
     const enemies = this.getEnemyGroup()
     if (!enemies) return
+
+    const weapon = this.getWeapon ? this.getWeapon() : null
+    if (!weapon) return
 
     this.attackLock = true
     this.lastAttack = { at: this.scene.time.now, hits: 0 }
 
     const facing = this.getFacing()
-    const offset = 42
-    const sizeW = 50
-    const sizeH = 34
+    const { offset, w: sizeW, h: sizeH } = this.resolveHitbox(weapon, facing)
 
     let hx = this.player.x
     let hy = this.player.y
@@ -145,7 +186,7 @@ export class CombatSystem {
       const go = (b as any)?.gameObject as Phaser.GameObjects.GameObject | undefined
       if (!go || !go.active) continue
       if (!(go instanceof Enemy)) continue
-      if (go.damage(this.scene.time.now, this.player.x, this.player.y, 1)) {
+      if (go.damage(this.scene.time.now, this.player.x, this.player.y, weapon.damage)) {
         this.lastAttack.hits++
         this.spawnHitSpark(go.x, go.y)
       }
@@ -153,11 +194,11 @@ export class CombatSystem {
 
     if (this.debugHitbox) this.showHitboxDebug(hx, hy, sizeW, sizeH)
 
-    this.playSwordVfx(hx, hy, facing)
+    this.playSwordVfx(hx, hy, facing, weapon)
 
     if (this.lastAttack.hits > 0) this.scene.cameras.main.shake(70, 0.003)
 
-    this.scene.time.delayedCall(220, () => {
+    this.scene.time.delayedCall(Math.max(0, Math.floor(weapon.cooldownMs)), () => {
       this.attackLock = false
     })
   }
@@ -188,18 +229,28 @@ export class CombatSystem {
     })
   }
 
-  private playSwordVfx(hx: number, hy: number, facing: Facing) {
+  private resolveHitbox(weapon: WeaponDef, facing: Facing): WeaponHitbox {
+    const base = weapon.hitbox
+    const perFacing = weapon.hitboxByFacing?.[facing]
+    return {
+      offset: typeof perFacing?.offset === 'number' ? perFacing.offset : base.offset,
+      w: typeof perFacing?.w === 'number' ? perFacing.w : base.w,
+      h: typeof perFacing?.h === 'number' ? perFacing.h : base.h,
+    }
+  }
+
+  private playSwordVfx(hx: number, hy: number, facing: Facing, weapon: WeaponDef) {
     const rotByFacing: Record<Facing, number> = { right: 0, down: Math.PI / 2, left: Math.PI, up: -Math.PI / 2 }
     const baseRot = rotByFacing[facing]
 
-    const sword = this.scene.add.image(this.player.x, this.player.y, 'sword').setDepth(DEPTH_HITBOX).setAlpha(1)
+    const sword = this.scene.add.image(this.player.x, this.player.y, weapon.vfx.weaponTexture).setDepth(DEPTH_HITBOX).setAlpha(1)
     sword.setOrigin(0.2, 0.5)
     sword.setRotation(baseRot)
 
-    const slash = this.scene.add.image(hx, hy, 'slash').setDepth(DEPTH_HITBOX).setAlpha(0.6)
+    const slash = this.scene.add.image(hx, hy, weapon.vfx.slashTexture).setDepth(DEPTH_HITBOX).setAlpha(0.6)
     slash.setBlendMode(Phaser.BlendModes.ADD)
     slash.setRotation(baseRot)
-    slash.setScale(0.85)
+    slash.setScale(weapon.vfx.slashScale)
 
     const swordOffset = 22
     const sx = this.player.x + Math.cos(baseRot) * swordOffset
