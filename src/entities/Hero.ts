@@ -1,10 +1,27 @@
 import * as Phaser from 'phaser'
 import { DEPTH_PLAYER, HERO_H, HERO_W } from '../game/constants'
 import type { Facing } from '../game/types'
+import { StateMachine } from '../game/StateMachine'
+
+export type HeroState = 'idle' | 'walk' | 'attack' | 'hurt'
+export type HeroIntent = { vx: number; vy: number; attackPressed: boolean }
+export type HeroUpdateResult = { didStartAttack: boolean }
 
 export class Hero extends Phaser.Physics.Arcade.Sprite {
+  private readonly fsm: StateMachine<HeroState, Hero>
   private facing: Facing = 'down'
   private moveVec = new Phaser.Math.Vector2()
+
+  private intent: HeroIntent = { vx: 0, vy: 0, attackPressed: false }
+  private moveSpeed = 0
+  private attackMs = 160
+  private didStartAttack = false
+  private attackUntil = 0
+
+  private hurtVx = 0
+  private hurtVy = 0
+  private hurtStopAt = 0
+  private hurtUntil = 0
 
   static preload(scene: Phaser.Scene) {
     scene.load.spritesheet('hero', '/sprites/hero.png', { frameWidth: HERO_W, frameHeight: HERO_H })
@@ -49,6 +66,68 @@ export class Hero extends Phaser.Physics.Arcade.Sprite {
     const body = this.body as Phaser.Physics.Arcade.Body
     body.setSize(28, 28)
     body.setOffset((HERO_W - 28) / 2, HERO_H - 28 - 8)
+
+    this.fsm = new StateMachine<HeroState, Hero>({
+      initial: 'idle',
+      now: scene.time.now,
+      handlers: {
+        idle: {
+          onEnter: (h) => h.stopMoving(),
+          onUpdate: (h, now) => {
+            if (h.intent.attackPressed) {
+              h.fsm.transition('attack', h, now)
+              return
+            }
+            if (h.intent.vx !== 0 || h.intent.vy !== 0) h.fsm.transition('walk', h, now)
+          },
+        },
+        walk: {
+          onUpdate: (h, now) => {
+            if (h.intent.attackPressed) {
+              h.fsm.transition('attack', h, now)
+              return
+            }
+            if (h.intent.vx === 0 && h.intent.vy === 0) {
+              h.fsm.transition('idle', h, now)
+              return
+            }
+            h.applyMovement(h.intent.vx, h.intent.vy, h.moveSpeed)
+          },
+        },
+        attack: {
+          onEnter: (h, _prev, now) => {
+            h.didStartAttack = true
+            h.attackUntil = now + Math.max(0, Math.floor(h.attackMs))
+            h.setVelocity(0, 0)
+            h.anims.stop()
+            h.setFrame(Hero.frameFor(h.facing, 0))
+          },
+          onUpdate: (h, now) => {
+            h.setVelocity(0, 0)
+            if (now < h.attackUntil) return
+            if (h.intent.vx !== 0 || h.intent.vy !== 0) h.fsm.transition('walk', h, now)
+            else h.fsm.transition('idle', h, now)
+          },
+        },
+        hurt: {
+          onEnter: (h) => {
+            h.anims.stop()
+            h.setFrame(Hero.frameFor(h.facing, 0))
+            h.setVelocity(h.hurtVx, h.hurtVy)
+          },
+          onUpdate: (h, now) => {
+            if (now >= h.hurtStopAt) h.setVelocity(0, 0)
+            if (now < h.hurtUntil) return
+            if (h.intent.vx !== 0 || h.intent.vy !== 0) h.fsm.transition('walk', h, now)
+            else h.fsm.transition('idle', h, now)
+          },
+        },
+      },
+    })
+  }
+
+  getState(): HeroState {
+    return this.fsm.getState()
   }
 
   getFacing() {
@@ -65,6 +144,25 @@ export class Hero extends Phaser.Physics.Arcade.Sprite {
     this.setVelocity(0, 0)
     this.anims.stop()
     this.setFrame(Hero.frameFor(this.facing, 0))
+  }
+
+  updateFsm(now: number, dt: number, intent: HeroIntent, opts: { moveSpeed: number; attackMs?: number }): HeroUpdateResult {
+    this.intent = intent
+    this.moveSpeed = opts.moveSpeed
+    if (typeof opts.attackMs === 'number') this.attackMs = opts.attackMs
+    this.didStartAttack = false
+    this.fsm.update(this, now, dt)
+    return { didStartAttack: this.didStartAttack }
+  }
+
+  hurt(now: number, knockback: { vx: number; vy: number }, opts?: { lockMs?: number; stopMs?: number }) {
+    const lockMs = Math.max(0, Math.floor(opts?.lockMs ?? 220))
+    const stopMs = Math.max(0, Math.floor(opts?.stopMs ?? 120))
+    this.hurtVx = knockback.vx
+    this.hurtVy = knockback.vy
+    this.hurtStopAt = now + stopMs
+    this.hurtUntil = now + lockMs
+    this.fsm.transition('hurt', this, now)
   }
 
   applyMovement(vx: number, vy: number, speed: number) {

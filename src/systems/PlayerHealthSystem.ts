@@ -1,11 +1,12 @@
 import * as Phaser from 'phaser'
 import { Enemy } from '../entities/Enemy'
+import { Hero } from '../entities/Hero'
 import { TILE_SIZE } from '../game/constants'
 import { HeartsUI } from '../ui/HeartsUI'
 
 export class PlayerHealthSystem {
   private scene: Phaser.Scene
-  private player: Phaser.Physics.Arcade.Sprite
+  private player: Hero
   private getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined
 
   private maxHp = 5
@@ -17,7 +18,7 @@ export class PlayerHealthSystem {
   private overlap?: Phaser.Physics.Arcade.Collider
   private ui: HeartsUI
 
-  constructor(scene: Phaser.Scene, player: Phaser.Physics.Arcade.Sprite, getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined) {
+  constructor(scene: Phaser.Scene, player: Hero, getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined) {
     this.scene = scene
     this.player = player
     this.getEnemyGroup = getEnemyGroup
@@ -136,11 +137,7 @@ export class PlayerHealthSystem {
     const v = new Phaser.Math.Vector2(dx, dy)
     if (v.lengthSq() < 0.0001) v.set(1, 0)
     v.normalize().scale(enemy.getTouchKnockback())
-    this.player.setVelocity(v.x, v.y)
-    this.scene.time.delayedCall(120, () => {
-      if (!this.player.active) return
-      this.player.setVelocity(0, 0)
-    })
+    this.player.hurt(now, { vx: v.x, vy: v.y })
   }
 
   private tileFor(go: Phaser.GameObjects.GameObject) {

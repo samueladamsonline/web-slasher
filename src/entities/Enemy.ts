@@ -91,6 +91,9 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
 
     this.applyKnockback(sourceX, sourceY, this.stats.knockback)
 
+    // Allow AI and other systems to react (hit-stun, sound, etc.).
+    this.scene.events.emit('enemy:damaged', { enemy: this, now })
+
     if (this.hp <= 0) {
       this.die()
     }

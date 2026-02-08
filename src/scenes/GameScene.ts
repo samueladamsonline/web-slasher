@@ -131,7 +131,7 @@ export class GameScene extends Phaser.Scene {
     this.mapRuntime.setPickupSystem(this.pickups)
     this.mapRuntime.setInteractionSystem(this.interactions)
 
-    this.enemyAI = new EnemyAISystem(this.hero, () => this.mapRuntime.enemies)
+    this.enemyAI = new EnemyAISystem(this, this.hero, () => this.mapRuntime.enemies)
 
     this.minimap = new MinimapUI(this, this.hero, {
       getMapKey: () => this.mapRuntime.mapKey,
@@ -152,7 +152,7 @@ export class GameScene extends Phaser.Scene {
     this.refreshDbg()
   }
 
-  update() {
+  update(_time: number, delta: number) {
     this.minimap?.update?.()
 
     if (this.startMenu) {
@@ -213,10 +213,11 @@ export class GameScene extends Phaser.Scene {
 
     if (this.paused) return
 
-    if (this.controls.justPressed('attack')) this.combat.tryAttack()
-
     const { vx, vy } = this.controls.getMoveAxes()
-    this.hero.applyMovement(vx, vy, this.speed)
+    const weapon = this.inventory.getWeaponDef()
+    const attackMs = weapon ? Math.max(120, Math.min(240, Math.floor(weapon.cooldownMs * 0.65))) : 160
+    const res = this.hero.updateFsm(this.time.now, delta, { vx, vy, attackPressed: this.controls.justPressed('attack') }, { moveSpeed: this.speed, attackMs })
+    if (res.didStartAttack) this.combat.tryAttack()
 
     this.health.update()
     this.pickups.update()
@@ -225,7 +226,7 @@ export class GameScene extends Phaser.Scene {
       this.refreshDbg()
       return
     }
-    this.enemyAI.update(this.time.now)
+    this.enemyAI.update(this.time.now, delta)
   }
 
   private createEnemyAnims() {
@@ -251,6 +252,7 @@ export class GameScene extends Phaser.Scene {
     const rawEnemies = this.mapRuntime.enemies?.getChildren?.() ?? []
     ;(window as any).__dbg = {
       player: this.hero,
+      heroState: this.hero.getState(),
       mapKey: this.mapRuntime.mapKey,
       spawnName: this.mapRuntime.spawnName,
       facing: this.hero.getFacing(),
