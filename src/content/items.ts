@@ -1,4 +1,5 @@
 import type { WeaponId } from './weapons'
+import type { SpellGrant } from './spells'
 
 export type EquipmentSlot = 'helmet' | 'chest' | 'gloves' | 'boots' | 'weapon' | 'shield'
 
@@ -8,6 +9,7 @@ export type ItemId =
   | 'heart'
   // Basic starting gear.
   | 'helmet_basic'
+  | 'helmet_pyro'
   | 'chest_basic'
   | 'gloves_basic'
   | 'boots_basic'
@@ -31,8 +33,8 @@ export type EquipmentInfo =
       attackSpeedPct?: number
       // Flat additive hearts to max HP.
       maxHpBonus?: number
-      // Spellcasting is unlocked by helmets (foundation for future spells).
-      grantsSpellcasting?: boolean
+      // Helmets can grant a spell list (id + level).
+      spells?: SpellGrant[]
     }
 
 export type ItemDef = {
@@ -56,7 +58,15 @@ export const ITEMS: Record<ItemId, ItemDef> = {
     kind: 'equipment',
     texture: 'item-helmet',
     stackable: false,
-    equip: { slot: 'helmet', armor: 1, grantsSpellcasting: true },
+    equip: { slot: 'helmet', armor: 1 },
+  },
+  helmet_pyro: {
+    id: 'helmet_pyro',
+    name: 'Ember Hood',
+    kind: 'equipment',
+    texture: 'item-helmet-fire',
+    stackable: false,
+    equip: { slot: 'helmet', armor: 1, spells: [{ id: 'fireball', level: 1 }] },
   },
   chest_basic: { id: 'chest_basic', name: 'Leather Tunic', kind: 'equipment', texture: 'item-chest', stackable: false, equip: { slot: 'chest', armor: 2, maxHpBonus: 0 } },
   gloves_basic: {

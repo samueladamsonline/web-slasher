@@ -12,6 +12,7 @@ import { PickupSystem } from '../systems/PickupSystem'
 import { PlayerHealthSystem } from '../systems/PlayerHealthSystem'
 import { SoundSystem } from '../systems/SoundSystem'
 import { CombatSystem } from '../systems/CombatSystem'
+import { SpellSystem } from '../systems/SpellSystem'
 import { SaveSystem, type SaveDataV1 } from '../systems/SaveSystem'
 import { HeartsUI } from '../ui/HeartsUI'
 import { DialogueUI } from '../ui/DialogueUI'
@@ -28,10 +29,12 @@ export class GameScene extends Phaser.Scene {
   private speed = 240
   private baseMaxHp = 5
   private debugAttackQueued = false
+  private debugCastQueued = false
   private cleanedUp = false
 
   private mapRuntime!: MapRuntime
   private combat!: CombatSystem
+  private spells!: SpellSystem
   private enemyAI!: EnemyAISystem
   private health!: PlayerHealthSystem
   private loot!: LootSystem
@@ -77,6 +80,7 @@ export class GameScene extends Phaser.Scene {
     this.load.tilemapTiledJSON('cave', '/maps/cave.json')
 
     CombatSystem.preload(this)
+    SpellSystem.preload(this)
     HeartsUI.preload(this)
     PickupSystem.preload(this)
     InteractionSystem.preload(this)
@@ -128,6 +132,7 @@ export class GameScene extends Phaser.Scene {
     this.mapRuntime = new MapRuntime(this, this.hero, {
       onChanged: () => {
         this.health?.onMapChanged?.()
+        this.spells?.onMapChanged?.()
         this.updateCheckpoint()
         this.mapNameUI.set(this.mapRuntime.mapKey)
         this.minimap?.onMapChanged?.()
@@ -144,6 +149,11 @@ export class GameScene extends Phaser.Scene {
       getAttackSpeedMul: () => this.inventory.getPlayerStats().attackSpeedMul,
       debugHitbox,
       hasLineOfSight: (fromX, fromY, toX, toY) => this.mapRuntime.hasLineOfSight(fromX, fromY, toX, toY),
+    })
+    this.spells = new SpellSystem(this, this.hero, () => this.mapRuntime.enemies, {
+      getFacing: () => this.hero.getFacing(),
+      getSpellbook: () => this.inventory.getPlayerStats().spells,
+      getCollisionLayer: () => this.mapRuntime.getCollisionLayer(),
     })
 
     this.health = new PlayerHealthSystem(this, this.hero, () => this.mapRuntime.enemies)
@@ -201,6 +211,7 @@ export class GameScene extends Phaser.Scene {
     this.interactions?.destroy?.()
     this.mapRuntime?.destroy?.()
     this.sfx?.destroy?.()
+    this.spells?.destroy?.()
 
     this.minimap?.destroy?.()
     this.inventoryUI?.destroy?.()
@@ -283,7 +294,9 @@ export class GameScene extends Phaser.Scene {
     const stats = this.inventory.getPlayerStats()
     const weapon = stats.weapon
     const attackJustPressed = this.controls.justPressed('attack')
+    const castJustPressed = this.controls.justPressed('cast')
     const attackPressedRaw = attackJustPressed || this.debugAttackQueued
+    const castPressedRaw = castJustPressed || this.debugCastQueued
     const attackPressed = !!weapon && attackPressedRaw && this.combat.canAttack()
     const scaledAttackTiming = weapon
       ? {
@@ -303,6 +316,14 @@ export class GameScene extends Phaser.Scene {
     if (!weapon) this.debugAttackQueued = false
     else if (res.didStartAttack) this.debugAttackQueued = false
     if (res.didStrike) this.combat.tryAttack()
+
+    // Spells are independent of melee weapons; helmets grant the spellbook.
+    if (castPressedRaw) {
+      const didCast = this.spells?.tryCastPrimary?.(this.time.now) ?? false
+      // Keep debug casts queued until they actually cast, so tests don't flake on cooldown timing.
+      if (!stats.spells?.length) this.debugCastQueued = false
+      else if (didCast) this.debugCastQueued = false
+    }
 
     this.health.setMaxHp(this.baseMaxHp + stats.maxHpBonus)
     this.health.update()
@@ -351,6 +372,11 @@ export class GameScene extends Phaser.Scene {
       getLastAttack: () => this.combat?.getDebug?.() ?? { at: 0, hits: 0 },
       tryAttack: () => {
         this.debugAttackQueued = true
+      },
+      getLastCast: () => this.spells?.getDebug?.() ?? { at: 0, spellId: null, level: 0, hits: 0 },
+      getProjectiles: () => this.spells?.getProjectilesDebug?.() ?? [],
+      tryCast: () => {
+        this.debugCastQueued = true
       },
       tryInteract: () => this.interactions?.tryInteract?.(),
       equipWeapon: (id: string) => {
@@ -555,7 +581,7 @@ export class GameScene extends Phaser.Scene {
       lines.push('ENTER: New Game')
     }
     lines.push('')
-    lines.push('WASD: Move   SPACE: Attack   E: Interact   I: Inventory   M: Map')
+    lines.push('WASD: Move   SPACE: Attack   F: Cast   E: Interact   I: Inventory   M: Map')
     this.overlay.showStart(lines)
     this.refreshDbg()
   }

@@ -1,5 +1,6 @@
 import * as Phaser from 'phaser'
 import { ITEMS, type EquipmentSlot, type ItemId } from '../content/items'
+import { SPELLS } from '../content/spells'
 import { WEAPONS } from '../content/weapons'
 import { DEPTH_UI } from '../game/constants'
 import type { InventoryItemStack, InventorySystem, SlotRef } from '../systems/InventorySystem'
@@ -45,6 +46,20 @@ export class InventoryUI {
       g.fillStyle(0xd9e3ee, 0.9)
       g.fillCircle(12, 16, 2)
       g.fillCircle(20, 16, 2)
+      g.lineStyle(3, 0x0a0d12, 0.55)
+      g.strokeRoundedRect(6, 9, 20, 15, 6)
+    })
+
+    ensure('item-helmet-fire', (g) => {
+      // Helmet with a warm "ember" gem to read as a spell-granting hood.
+      g.fillStyle(0x3b2a1a, 1)
+      g.fillRoundedRect(6, 9, 20, 15, 6)
+      g.fillStyle(0x6b4c2a, 1)
+      g.fillRoundedRect(7, 10, 18, 13, 6)
+      g.fillStyle(0xff6b3d, 0.95)
+      g.fillCircle(16, 15, 3)
+      g.fillStyle(0xffd96b, 0.65)
+      g.fillCircle(15, 14, 1.5)
       g.lineStyle(3, 0x0a0d12, 0.55)
       g.strokeRoundedRect(6, 9, 20, 15, 6)
     })
@@ -781,8 +796,19 @@ export class InventoryUI {
         if (typeof hp === 'number' && Number.isFinite(hp) && hp !== 0) lines.push(`Max HP: +${Math.floor(hp)} Hearts`)
 
         if (def.equip.slot === 'helmet') {
-          const grants = def.equip.grantsSpellcasting
-          if (grants === undefined || !!grants) lines.push(`Spellcasting: Enabled`)
+          const spells = def.equip.spells ?? []
+          if (spells.length) {
+            const formatted = spells
+              .map((s) => {
+                const spellDef = SPELLS[s.id]
+                const lvl = typeof s.level === 'number' && Number.isFinite(s.level) ? Math.max(1, Math.floor(s.level)) : 1
+                return `${spellDef?.name ?? String(s.id)} (Lv ${lvl})`
+              })
+              .join(', ')
+            lines.push(`Spells: ${formatted}`)
+          } else {
+            lines.push(`Spells: None`)
+          }
         }
       }
 

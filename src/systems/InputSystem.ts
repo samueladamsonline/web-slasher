@@ -1,6 +1,6 @@
 import * as Phaser from 'phaser'
 
-export type ActionId = 'confirm' | 'newGame' | 'pause' | 'inventory' | 'map' | 'attack' | 'interact' | 'weapon1' | 'weapon2'
+export type ActionId = 'confirm' | 'newGame' | 'pause' | 'inventory' | 'map' | 'attack' | 'cast' | 'interact' | 'weapon1' | 'weapon2'
 
 export class InputSystem {
   private cursors: Phaser.Types.Input.Keyboard.CursorKeys
@@ -26,6 +26,7 @@ export class InputSystem {
       inventory: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I),
       map: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M),
       attack: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE),
+      cast: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F),
       interact: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E),
       weapon1: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ONE),
       weapon2: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TWO),
@@ -47,4 +48,3 @@ export class InputSystem {
     return { vx, vy }
   }
 }
-

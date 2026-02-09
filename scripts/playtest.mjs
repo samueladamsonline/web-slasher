@@ -71,6 +71,14 @@ async function getLastAttack(page) {
   return await page.evaluate(() => (typeof globalThis.__dbg?.getLastAttack === 'function' ? globalThis.__dbg.getLastAttack() : globalThis.__dbg?.lastAttack ?? null))
 }
 
+async function getLastCast(page) {
+  return await page.evaluate(() => (typeof globalThis.__dbg?.getLastCast === 'function' ? globalThis.__dbg.getLastCast() : null))
+}
+
+async function getProjectiles(page) {
+  return await page.evaluate(() => (typeof globalThis.__dbg?.getProjectiles === 'function' ? globalThis.__dbg.getProjectiles() : null))
+}
+
 async function getPlayerHp(page) {
   return await page.evaluate(() =>
     typeof globalThis.__dbg?.getPlayerHp === 'function' ? globalThis.__dbg.getPlayerHp() : globalThis.__dbg?.playerHp ?? null,
@@ -687,6 +695,129 @@ try {
     if (!hasQuickGloves) throw new Error(`expected starter bag to include gloves_quick; bag=${JSON.stringify(inv0.bag)}`)
     const hasHeartyChest = inv0.bag.some((s) => s?.id === 'chest_hearty')
     if (!hasHeartyChest) throw new Error(`expected starter bag to include chest_hearty; bag=${JSON.stringify(inv0.bag)}`)
+    const hasPyroHelm = inv0.bag.some((s) => s?.id === 'helmet_pyro')
+    if (!hasPyroHelm) throw new Error(`expected starter bag to include helmet_pyro; bag=${JSON.stringify(inv0.bag)}`)
+
+    // Spells sanity: starter helmet grants no spells; stash helmet grants Fireball (Lv1).
+    try {
+      const idxPyro = inv0.bag.findIndex((s) => s?.id === 'helmet_pyro')
+      if (idxPyro < 0) throw new Error(`expected to find helmet_pyro in bag; bag=${JSON.stringify(inv0.bag)}`)
+
+      // Freeze enemies so casting is deterministic and does not affect later AI tests.
+      await page.evaluate(() => {
+        const scene = globalThis.__dbg?.player?.scene
+        const group = scene?.mapRuntime?.enemies
+        const kids = group?.getChildren?.() ?? []
+        for (const e of kids) {
+          if (!e?.stats) continue
+          if (typeof e.__testPrevSpeed !== 'number') e.__testPrevSpeed = e.stats.moveSpeed
+          e.stats.moveSpeed = 0
+          if (typeof e.setVelocity === 'function') e.setVelocity(0, 0)
+        }
+      })
+
+      try {
+        const open = await findOpenTileSample(page, 4)
+        if (!open) throw new Error('could not find open tiles for fireball test')
+
+        const spacing = open.tile * 4
+        await teleportEnemy(page, 'slime', open.x + spacing, open.y)
+        await teleportPlayer(page, open.x - spacing, open.y)
+        await page.waitForTimeout(120)
+
+        await page.evaluate(() => {
+          const p = globalThis.__dbg?.player
+          if (!p) return
+          if (typeof globalThis.__dbg?.setFacing === 'function') globalThis.__dbg.setFacing('right')
+          if (typeof p.setVelocity === 'function') p.setVelocity(0, 0)
+        })
+
+        // Baseline: with starter helmet, casting should do nothing.
+        const cast0 = await getLastCast(page)
+        const prevCastAt0 = typeof cast0?.at === 'number' ? cast0.at : 0
+        const enemiesB0 = await getEnemies(page)
+        const slimeB0 = Array.isArray(enemiesB0) ? enemiesB0.find((e) => e.kind === 'slime') : null
+        const slimeHp0 = slimeB0?.hp
+        if (typeof slimeHp0 !== 'number') throw new Error(`expected numeric slime hp before baseline cast; enemies=${JSON.stringify(enemiesB0)}`)
+
+        await page.evaluate(() => globalThis.__dbg?.tryCast?.())
+        await page.waitForTimeout(700)
+        const cast1 = await getLastCast(page)
+        const castAt1 = typeof cast1?.at === 'number' ? cast1.at : 0
+        if (castAt1 > prevCastAt0) throw new Error(`expected no cast with starter helmet; cast0=${JSON.stringify(cast0)} cast1=${JSON.stringify(cast1)}`)
+
+        const enemiesB1 = await getEnemies(page)
+        const slimeB1 = Array.isArray(enemiesB1) ? enemiesB1.find((e) => e.kind === 'slime') : null
+        const slimeHp1 = slimeB1?.hp
+        if (slimeHp1 !== slimeHp0) throw new Error(`expected baseline cast to not damage slime; hp0=${slimeHp0} hp1=${slimeHp1}`)
+
+        // Equip ember hood (grants Fireball Lv1).
+        const equipHelmOk = await page.evaluate(({ idxPyro }) => globalThis.__dbg?.moveInvItem?.({ type: 'bag', index: idxPyro }, { type: 'equip', slot: 'helmet' }), {
+          idxPyro,
+        })
+        if (!equipHelmOk?.ok) throw new Error(`expected equipping helmet_pyro to succeed; res=${JSON.stringify(equipHelmOk)}`)
+        await page.waitForTimeout(120)
+
+        // Cast Fireball and verify it deals 1 damage and stops on hit.
+        const cast2 = await getLastCast(page)
+        const prevCastAt2 = typeof cast2?.at === 'number' ? cast2.at : 0
+
+        const enemiesC0 = await getEnemies(page)
+        const slimeC0 = Array.isArray(enemiesC0) ? enemiesC0.find((e) => e.kind === 'slime') : null
+        const slimeHpC0 = slimeC0?.hp
+        if (typeof slimeHpC0 !== 'number') throw new Error(`expected numeric slime hp before fireball; enemies=${JSON.stringify(enemiesC0)}`)
+
+        await page.evaluate(() => globalThis.__dbg?.tryCast?.())
+
+        // Wait for cast to register.
+        let castAt3 = null
+        const startedCastWait = Date.now()
+        while (Date.now() - startedCastWait < 1200) {
+          const c = await getLastCast(page)
+          const at = typeof c?.at === 'number' ? c.at : null
+          if (typeof at === 'number' && at > prevCastAt2) {
+            castAt3 = at
+            break
+          }
+          await page.waitForTimeout(20)
+        }
+        if (!(typeof castAt3 === 'number')) throw new Error('timed out waiting for fireball cast')
+
+        // Wait for slime HP to drop by exactly 1.
+        let slimeHpC1 = slimeHpC0
+        const startedHpWait = Date.now()
+        while (Date.now() - startedHpWait < 2200) {
+          const enemies = await getEnemies(page)
+          const s = Array.isArray(enemies) ? enemies.find((e) => e.kind === 'slime') : null
+          const hp = s?.hp
+          if (typeof hp === 'number') slimeHpC1 = hp
+          if (typeof hp === 'number' && hp < slimeHpC0) break
+          await page.waitForTimeout(40)
+        }
+        if (slimeHpC1 !== slimeHpC0 - 1) throw new Error(`expected fireball damage=1; before=${slimeHpC0} after=${slimeHpC1}`)
+
+        // Projectile should be gone shortly after hit.
+        await page.waitForTimeout(180)
+        const projs = await getProjectiles(page)
+        const count = Array.isArray(projs) ? projs.length : null
+        if (!(count === 0)) throw new Error(`expected fireball projectile to despawn on hit; projectiles=${JSON.stringify(projs)}`)
+      } finally {
+        // Restore enemy speeds.
+        await page.evaluate(() => {
+          const scene = globalThis.__dbg?.player?.scene
+          const group = scene?.mapRuntime?.enemies
+          const kids = group?.getChildren?.() ?? []
+          for (const e of kids) {
+            if (!e?.stats) continue
+            const prev = e.__testPrevSpeed
+            if (typeof prev === 'number') e.stats.moveSpeed = prev
+            delete e.__testPrevSpeed
+          }
+        })
+      }
+    } catch (e) {
+      errors.push(`expected spellcasting (fireball); ${String(e?.message ?? e)}`)
+    }
 
     // 2H weapon rule: equipping greatsword should unequip shield, and shield should not be equippable while 2H is active.
     await equipWeapon(page, 'greatsword')

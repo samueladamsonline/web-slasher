@@ -71,6 +71,10 @@ export class MapRuntime {
     return this.state?.enemies
   }
 
+  getCollisionLayer() {
+    return this.state?.collision ?? null
+  }
+
   get spawnName() {
     return this.state?.spawnName ?? null
   }

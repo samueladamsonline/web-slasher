@@ -14,6 +14,7 @@ Web-Slasher is a Phaser-based 2D top-down action RPG. The game is organized arou
 ## Core Systems
 - `EnemyAISystem`: finite state machines per enemy. Bats use path-following when line-of-sight is blocked; slimes wander/leash.
 - `CombatSystem`: handles player attacks and hit detection.
+- `SpellSystem`: handles spell casting and projectile spells (data-driven from `src/content/spells.ts`).
 - `PlayerHealthSystem`: damage, invulnerability, and health UI. Touch damage uses overlap + swept-circle check for tunneling.
 - `InventorySystem`: equipment, weapons, and bag.
 - `PickupSystem` + `LootSystem`: drops and auto-pickups.
@@ -29,9 +30,9 @@ Player power is derived from equipment via `InventorySystem.getPlayerStats()`:
 - Boots: `moveSpeedPct` (multiplies base movement speed).
 - Gloves: `attackSpeedPct` (scales weapon windup/active/recovery and combat lock time).
 - Chest: `maxHpBonus` (adds flat hearts to max HP; if the player was full, stays full on increases).
-- Helmet: `grantsSpellcasting` (foundation for future spells; currently only exposed via stats).
+- Helmet: grants a spellbook (spell id + level). Casting uses this list (foundation for future hotbar / multiple spells).
 
-`GameScene` is the integration point: it applies `moveSpeedMul`, scaled attack timings, and max HP to the hero/combat/health systems.
+`GameScene` is the integration point: it applies `moveSpeedMul`, scaled attack timings, and max HP to the hero/combat/health systems, and wires `SpellSystem` to cast from the equipped helmet spellbook (default key: `F`).
 
 ## Pathfinding
 `src/game/pathfinding.ts` provides A* on the collision grid. `MapRuntime.findPath` wraps this and returns tile + world-point paths. `EnemyAISystem` uses `findPath` and `hasLineOfSight` to chase around walls rather than pushing into them.

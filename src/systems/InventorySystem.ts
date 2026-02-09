@@ -1,4 +1,5 @@
 import { ITEMS, type EquipmentSlot, type ItemId } from '../content/items'
+import { SPELLS, type SpellGrant } from '../content/spells'
 import { WEAPONS, type WeaponDef, type WeaponHands, type WeaponId } from '../content/weapons'
 
 export type InventoryItemStack = { id: ItemId; qty: number }
@@ -13,7 +14,7 @@ export type PlayerStats = {
   attackSpeedPct: number
   attackSpeedMul: number
   maxHpBonus: number
-  canCastSpells: boolean
+  spells: SpellGrant[]
   weapon: WeaponDef | null
   attackDamage: number
 }
@@ -90,6 +91,7 @@ export class InventorySystem {
     this.bag[1] = { id: 'boots_swift', qty: 1 }
     this.bag[2] = { id: 'gloves_quick', qty: 1 }
     this.bag[3] = { id: 'chest_hearty', qty: 1 }
+    this.bag[4] = { id: 'helmet_pyro', qty: 1 }
   }
 
   setOnChanged(cb: (() => void) | undefined) {
@@ -126,6 +128,7 @@ export class InventorySystem {
     this.bag[1] = { id: 'boots_swift', qty: 1 }
     this.bag[2] = { id: 'gloves_quick', qty: 1 }
     this.bag[3] = { id: 'chest_hearty', qty: 1 }
+    this.bag[4] = { id: 'helmet_pyro', qty: 1 }
 
     this.onChanged?.()
   }
@@ -346,13 +349,14 @@ export class InventorySystem {
 
     const helmId = this.getEquipment('helmet')
     const helm = helmId ? ITEMS[helmId] : null
-    const canCastSpells =
-      !!(
-        helm &&
-        helm.kind === 'equipment' &&
-        helm.equip?.slot === 'helmet' &&
-        (helm.equip.grantsSpellcasting === undefined || !!helm.equip.grantsSpellcasting)
-      )
+    const spellsRaw = helm && helm.kind === 'equipment' && helm.equip?.slot === 'helmet' ? (helm.equip.spells ?? []) : []
+    const spells: SpellGrant[] = []
+    for (const s of spellsRaw) {
+      if (!s) continue
+      if (!(s.id in SPELLS)) continue
+      const level = typeof s.level === 'number' && Number.isFinite(s.level) ? Math.max(1, Math.floor(s.level)) : 1
+      spells.push({ id: s.id, level })
+    }
 
     const msMulRaw = 1 + (Number.isFinite(moveSpeedPct) ? moveSpeedPct / 100 : 0)
     const asMulRaw = 1 + (Number.isFinite(attackSpeedPct) ? attackSpeedPct / 100 : 0)
@@ -365,7 +369,7 @@ export class InventorySystem {
       attackSpeedPct: Number.isFinite(attackSpeedPct) ? attackSpeedPct : 0,
       attackSpeedMul,
       maxHpBonus,
-      canCastSpells,
+      spells,
       weapon,
       attackDamage: weapon ? weapon.damage : 0,
     }
