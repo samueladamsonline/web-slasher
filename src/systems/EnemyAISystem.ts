@@ -241,10 +241,13 @@ export class EnemyAISystem {
         clearPath()
       }
 
-      const lineOfSight = this.hasLineOfSight?.(enemy.x, enemy.y, targetX, targetY) ?? true
+      const e0 = getEnemyCenter()
+      const lineOfSight = this.hasLineOfSight?.(e0.x, e0.y, targetX, targetY) ?? true
       if (lineOfSight) {
-        clearPath()
         pathState.lastTarget = { x: targetX, y: targetY }
+        // Reset progress tracking so if LOS flips near corners, we don't immediately consider ourselves stuck.
+        pathState.lastDist = Number.POSITIVE_INFINITY
+        pathState.lastProgressAt = now
         seek(targetX, targetY, dt)
         return
       }
@@ -257,7 +260,7 @@ export class EnemyAISystem {
         pathState.points.length === 0
 
       if (shouldRepath && this.findPath) {
-        const res = this.findPath(enemy.x, enemy.y, targetX, targetY)
+        const res = this.findPath(e0.x, e0.y, targetX, targetY)
         if (res?.points?.length) {
           pathState.points = res.points
           pathState.index = 0
@@ -274,11 +277,17 @@ export class EnemyAISystem {
 
       let target = pathState.points[pathState.index]
       const e = getEnemyCenter()
+      const startIdx = pathState.index
       while (target) {
         const dist = Math.hypot(target.x - e.x, target.y - e.y)
         if (dist > WAYPOINT_RADIUS || pathState.index >= pathState.points.length - 1) break
         pathState.index += 1
         target = pathState.points[pathState.index]
+      }
+
+      if (pathState.index !== startIdx) {
+        pathState.lastDist = Number.POSITIVE_INFINITY
+        pathState.lastProgressAt = now
       }
 
       if (!target) {
