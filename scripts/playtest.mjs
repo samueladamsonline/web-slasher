@@ -1145,6 +1145,43 @@ try {
         }
         if (!(hp1 < hp0)) throw new Error(`expected bat touch damage on chase; hp0=${hp0} hp1=${hp1}`)
 
+        // Deaggro sanity: leaving aggro should cause the bat to return home, not jitter near the boundary.
+        const spawn = await page.evaluate(() => {
+          const scene = globalThis.__dbg?.player?.scene
+          const group = scene?.mapRuntime?.enemies
+          const kids = group?.getChildren?.() ?? []
+          const e = kids.find((k) => k?.active && k?.kind === 'bat')
+          if (!e) return null
+          return { x: e.spawnX, y: e.spawnY }
+        })
+        if (!spawn) throw new Error('bat spawn not readable for deaggro test')
+
+        await teleportEnemy(page, 'bat', spawn.x, spawn.y)
+        await teleportPlayer(page, spawn.x - 120, spawn.y)
+        await page.waitForTimeout(650)
+        const dAway = await page.evaluate(({ spawn }) => {
+          const scene = globalThis.__dbg?.player?.scene
+          const group = scene?.mapRuntime?.enemies
+          const kids = group?.getChildren?.() ?? []
+          const e = kids.find((k) => k?.active && k?.kind === 'bat')
+          if (!e) return null
+          return Math.hypot(e.x - spawn.x, e.y - spawn.y)
+        }, { spawn })
+        if (!(typeof dAway === 'number' && dAway > 20)) throw new Error(`expected bat to move away from spawn while chasing; dAway=${dAway}`)
+
+        await teleportPlayer(page, 100, 100)
+        await page.waitForTimeout(900)
+        const dReturn = await page.evaluate(({ spawn }) => {
+          const scene = globalThis.__dbg?.player?.scene
+          const group = scene?.mapRuntime?.enemies
+          const kids = group?.getChildren?.() ?? []
+          const e = kids.find((k) => k?.active && k?.kind === 'bat')
+          if (!e) return null
+          return Math.hypot(e.x - spawn.x, e.y - spawn.y)
+        }, { spawn })
+        if (!(typeof dReturn === 'number' && dReturn < dAway - 6))
+          throw new Error(`expected bat to return toward spawn after deaggro; dAway=${dAway} dReturn=${dReturn}`)
+
 	      } catch (e) {
 	        errors.push(`expected bat chase behavior (AI); ${String(e?.message ?? e)}`)
 	      }

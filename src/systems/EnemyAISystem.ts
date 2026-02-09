@@ -165,6 +165,7 @@ export class EnemyAISystem {
     const PATH_RECALC_MS = 220
     const WAYPOINT_RADIUS = 6
     const STUCK_TIMEOUT_MS = 350
+    const HOME_RADIUS = 14
 
     const pathState = {
       targetKey: '',
@@ -347,7 +348,8 @@ export class EnemyAISystem {
             const aggro = enemy.getAggroRadius() || 260
             const { dist } = getPlayerVec()
             if (dist > aggro * 1.15) {
-              fsm.transition('hover', c, now)
+              // Lost the player: return home (don't hover where we lost aggro).
+              fsm.transition('return', c, now)
               return
             }
             const p = getPlayerCenter()
@@ -356,7 +358,10 @@ export class EnemyAISystem {
         },
         return: {
           onUpdate: (c, now, dt) => {
-            if (!shouldLeash()) {
+            const dx = enemy.spawnX - enemy.x
+            const dy = enemy.spawnY - enemy.y
+            if (Math.hypot(dx, dy) <= HOME_RADIUS) {
+              enemy.setVelocity(0, 0)
               fsm.transition('hover', c, now)
               return
             }
@@ -372,7 +377,7 @@ export class EnemyAISystem {
             }
             const aggro = enemy.getAggroRadius() || 260
             const { dist } = getPlayerVec()
-            fsm.transition(dist < aggro ? 'chase' : 'hover', c, now)
+            fsm.transition(dist < aggro ? 'chase' : 'return', c, now)
           },
         },
       },
