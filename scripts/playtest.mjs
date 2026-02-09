@@ -1216,6 +1216,77 @@ try {
         }
         if (!reAggroTouch) throw new Error('expected bat to re-aggro when player re-enters range')
 
+        // Edge case: if the player is already within aggro when the cooldown expires (near the bat, not near spawn),
+        // the bat should resume chasing (not freeze in place).
+        await teleportEnemy(page, 'bat', spawn.x, spawn.y)
+        await teleportPlayer(page, spawn.x - 120, spawn.y)
+        await page.waitForTimeout(500)
+
+        await teleportPlayer(page, 100, 100)
+        await page.waitForTimeout(220)
+
+        const nearBat = await page.evaluate(() => {
+          const scene = globalThis.__dbg?.player?.scene
+          const rt = scene?.mapRuntime
+          const group = rt?.enemies
+          const kids = group?.getChildren?.() ?? []
+          const bat = kids.find((k) => k?.active && k?.kind === 'bat')
+          if (!bat || !rt) return null
+
+          const leash = typeof bat?.stats?.leashRadius === 'number' ? bat.stats.leashRadius : 0
+          const spawn = { x: bat.spawnX, y: bat.spawnY }
+          const b = { x: bat.x, y: bat.y }
+
+          const vx = b.x - spawn.x
+          const vy = b.y - spawn.y
+          const len = Math.hypot(vx, vy) || 1
+          const px = -vy / len
+          const py = vx / len
+
+          const candidates = [
+            { x: b.x + px * 140, y: b.y + py * 140 },
+            { x: b.x - px * 140, y: b.y - py * 140 },
+            { x: b.x + px * 110, y: b.y + py * 110 },
+            { x: b.x - px * 110, y: b.y - py * 110 },
+          ]
+
+          const ok = (p) => {
+            if (typeof p?.x !== 'number' || typeof p?.y !== 'number') return false
+            if (typeof rt.isWorldBlocked === 'function' && rt.isWorldBlocked(p.x, p.y)) return false
+            if (leash > 0 && Math.hypot(p.x - spawn.x, p.y - spawn.y) > leash - 4) return false
+            return true
+          }
+
+          const player = candidates.find(ok) ?? { x: b.x + 140, y: b.y }
+          return { player }
+        })
+        if (!nearBat?.player) throw new Error('failed to find a near-bat open position for cooldown edge-case test')
+
+        await teleportPlayer(page, nearBat.player.x, nearBat.player.y)
+        await page.waitForTimeout(120)
+
+        // Wait for cooldown to elapse, then assert the bat starts closing distance again.
+        await page.waitForTimeout(1000)
+        const d0 = await page.evaluate(({ player }) => {
+          const scene = globalThis.__dbg?.player?.scene
+          const group = scene?.mapRuntime?.enemies
+          const kids = group?.getChildren?.() ?? []
+          const bat = kids.find((k) => k?.active && k?.kind === 'bat')
+          if (!bat) return null
+          return Math.hypot(bat.x - player.x, bat.y - player.y)
+        }, { player: nearBat.player })
+        await page.waitForTimeout(420)
+        const d1 = await page.evaluate(({ player }) => {
+          const scene = globalThis.__dbg?.player?.scene
+          const group = scene?.mapRuntime?.enemies
+          const kids = group?.getChildren?.() ?? []
+          const bat = kids.find((k) => k?.active && k?.kind === 'bat')
+          if (!bat) return null
+          return Math.hypot(bat.x - player.x, bat.y - player.y)
+        }, { player: nearBat.player })
+        if (!(typeof d0 === 'number' && typeof d1 === 'number')) throw new Error(`bat missing for cooldown edge-case; d0=${d0} d1=${d1}`)
+        if (!(d1 < d0 - 2)) throw new Error(`expected bat to close distance after cooldown; d0=${d0} d1=${d1}`)
+
 		      } catch (e) {
 		        errors.push(`expected bat chase behavior (AI); ${String(e?.message ?? e)}`)
 		      }

@@ -176,6 +176,7 @@ export class EnemyAISystem {
       lastTarget: { x: 0, y: 0 },
       lastProgressAt: 0,
       lastDist: Number.POSITIVE_INFINITY,
+      mode: 'path' as 'path' | 'direct',
     }
 
     const clearPath = () => {
@@ -184,6 +185,7 @@ export class EnemyAISystem {
       pathState.lastComputeAt = -Infinity
       pathState.lastProgressAt = 0
       pathState.lastDist = Number.POSITIVE_INFINITY
+      pathState.mode = 'path'
     }
 
     const getPlayerCenter = () => {
@@ -254,13 +256,34 @@ export class EnemyAISystem {
 
       const e0 = getEnemyCenter()
       const lineOfSight = this.hasLineOfSight?.(e0.x, e0.y, targetX, targetY) ?? true
+
+      // Even when LOS is true, we can still get "stuck" against collision (for example corners, tight gaps,
+      // or LOS false-positives). Track progress and fall back to pathing if we haven't closed distance
+      // for a short window.
+      let forcePath = false
       if (lineOfSight) {
+        if (pathState.mode !== 'direct') {
+          pathState.mode = 'direct'
+          pathState.lastDist = Number.POSITIVE_INFINITY
+          pathState.lastProgressAt = now
+        }
         pathState.lastTarget = { x: targetX, y: targetY }
-        // Reset progress tracking so if LOS flips near corners, we don't immediately consider ourselves stuck.
+        const dist = seek(targetX, targetY, dt)
+        if (dist < pathState.lastDist - 0.5) {
+          pathState.lastDist = dist
+          pathState.lastProgressAt = now
+          return
+        }
+        if (now - pathState.lastProgressAt <= STUCK_TIMEOUT_MS) return
+
+        forcePath = true
+        clearPath()
+      }
+
+      if (pathState.mode !== 'path') {
+        pathState.mode = 'path'
         pathState.lastDist = Number.POSITIVE_INFINITY
         pathState.lastProgressAt = now
-        seek(targetX, targetY, dt)
-        return
       }
 
       const targetMoved = Math.hypot(targetX - pathState.lastTarget.x, targetY - pathState.lastTarget.y) > 12
@@ -270,7 +293,7 @@ export class EnemyAISystem {
         now - pathState.lastComputeAt > PATH_RECALC_MS ||
         pathState.points.length === 0
 
-      if (shouldRepath && this.findPath) {
+      if ((forcePath || shouldRepath) && this.findPath) {
         const res = this.findPath(e0.x, e0.y, targetX, targetY)
         if (res?.points?.length) {
           pathState.points = res.points
