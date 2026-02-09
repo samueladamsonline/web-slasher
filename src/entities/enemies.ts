@@ -66,6 +66,7 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
     leashRadius: 220,
     touchDamage: 1,
     touchKnockback: 320,
+    touchRadius: 24,
     aggroRadius: 260,
     body: { w: 34, h: 18, ox: (64 - 34) / 2, oy: 48 - 18 - 10 },
     drops: [

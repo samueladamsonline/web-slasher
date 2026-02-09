@@ -123,6 +123,7 @@ export class PlayerHealthSystem {
     // Prevent accidental warps during knockback/hit feedback.
     this.warpLockUntil = Math.max(this.warpLockUntil, now + 350)
     this.ui.set(this.maxHp, this.hp)
+    enemy.recordPlayerHit(now)
 
     // Feedback + knockback.
     this.player.setTintFill(0xffffff)

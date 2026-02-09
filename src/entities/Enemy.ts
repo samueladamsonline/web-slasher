@@ -24,6 +24,7 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
   private invulnUntil = 0
   readonly spawnX: number
   readonly spawnY: number
+  private lastPlayerHitAt = -Infinity
   stats: EnemyStats
 
   constructor(scene: Phaser.Scene, x: number, y: number, def: EnemyDef, hpOverride?: number) {
@@ -85,6 +86,14 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     const r = Math.max(w, h) * 0.5
     // Small padding so visual contact is more likely to register.
     return Math.max(8, r + 4)
+  }
+
+  recordPlayerHit(now: number) {
+    this.lastPlayerHitAt = now
+  }
+
+  getLastPlayerHitAt() {
+    return this.lastPlayerHitAt
   }
 
   getMoveSpeed() {

@@ -11,8 +11,8 @@ type EnemyController = {
 type SlimeState = 'wander' | 'leash' | 'hitstun'
 type SlimeCtx = { enemy: Enemy; seed: number; hitstunUntil: number }
 
-type BatState = 'hover' | 'chase' | 'retreat' | 'leash' | 'hitstun'
-type BatCtx = { enemy: Enemy; hitstunUntil: number; retreatUntil: number; retreatCooldownUntil: number; retreatDir: { x: number; y: number } | null }
+type BatState = 'hover' | 'chase' | 'hitstun'
+type BatCtx = { enemy: Enemy; hitstunUntil: number }
 
 type EnemyDamagedEvent = GameEventMap[typeof GAME_EVENTS.ENEMY_DAMAGED]
 
@@ -62,8 +62,10 @@ export class EnemyAISystem {
   private recordSafePos(enemy: Enemy) {
     if (!this.isWorldBlocked) return
     const body = enemy.body as Phaser.Physics.Arcade.Body | null
-    const cx = body?.center?.x ?? enemy.x
-    const cy = body?.center?.y ?? enemy.y
+    const cxRaw = body?.center?.x
+    const cyRaw = body?.center?.y
+    const cx = Number.isFinite(cxRaw) ? (cxRaw as number) : enemy.x
+    const cy = Number.isFinite(cyRaw) ? (cyRaw as number) : enemy.y
     if (this.isWorldBlocked(cx, cy)) return
     this.lastSafePos.set(enemy, { x: enemy.x, y: enemy.y })
   }
@@ -71,8 +73,10 @@ export class EnemyAISystem {
   private enforceNotInBlockedTile(enemy: Enemy) {
     if (!this.isWorldBlocked) return
     const body = enemy.body as Phaser.Physics.Arcade.Body | null
-    const cx = body?.center?.x ?? enemy.x
-    const cy = body?.center?.y ?? enemy.y
+    const cxRaw = body?.center?.x
+    const cyRaw = body?.center?.y
+    const cx = Number.isFinite(cxRaw) ? (cxRaw as number) : enemy.x
+    const cy = Number.isFinite(cyRaw) ? (cyRaw as number) : enemy.y
     if (!this.isWorldBlocked(cx, cy)) return
 
     const safe = this.lastSafePos.get(enemy) ?? { x: enemy.spawnX, y: enemy.spawnY }
@@ -179,64 +183,23 @@ export class EnemyAISystem {
   }
 
   private createBatController(enemy: Enemy): EnemyController {
-    const ctx: BatCtx = { enemy, hitstunUntil: 0, retreatUntil: 0, retreatCooldownUntil: 0, retreatDir: null }
+    const ctx: BatCtx = { enemy, hitstunUntil: 0 }
 
     const getPlayerCenter = () => {
       const body = this.player.body as Phaser.Physics.Arcade.Body | undefined
-      return { x: body?.center?.x ?? this.player.x, y: body?.center?.y ?? this.player.y }
-    }
-
-    const getPlayerRadius = () => {
-      const body = this.player.body as Phaser.Physics.Arcade.Body | undefined
-      const w = typeof body?.width === 'number' ? body.width : 0
-      const h = typeof body?.height === 'number' ? body.height : 0
-      return Math.max(w, h) * 0.5
+      const cx = body?.center?.x
+      const cy = body?.center?.y
+      return {
+        x: Number.isFinite(cx) ? (cx as number) : this.player.x,
+        y: Number.isFinite(cy) ? (cy as number) : this.player.y,
+      }
     }
 
     const getEnemyCenter = () => {
       const body = enemy.body as Phaser.Physics.Arcade.Body | undefined
-      return { x: body?.center?.x ?? enemy.x, y: body?.center?.y ?? enemy.y }
-    }
-
-    const isTouchingPlayer = () => {
-      const pb = this.player.body as Phaser.Physics.Arcade.Body | undefined
-      const eb = enemy.body as Phaser.Physics.Arcade.Body | undefined
-      if (pb && eb) {
-        const pad = 2
-        const pLeft = pb.left - pad
-        const pRight = pb.right + pad
-        const pTop = pb.top - pad
-        const pBottom = pb.bottom + pad
-        const eLeft = eb.left - pad
-        const eRight = eb.right + pad
-        const eTop = eb.top - pad
-        const eBottom = eb.bottom + pad
-        return pLeft <= eRight && pRight >= eLeft && pTop <= eBottom && pBottom >= eTop
-      }
-
-      const { dist } = getPlayerVec()
-      const touchDist = getPlayerRadius() + enemy.getTouchRadius() + 2
-      return dist < touchDist
-    }
-
-    const shouldLeash = () => {
-      const leash = enemy.getLeashRadius()
-      if (!(leash > 0)) return false
-      const dx = enemy.spawnX - enemy.x
-      const dy = enemy.spawnY - enemy.y
-      return Math.hypot(dx, dy) > leash
-    }
-
-    const goHome = () => {
-      const speed = enemy.getMoveSpeed()
-      const dx = enemy.spawnX - enemy.x
-      const dy = enemy.spawnY - enemy.y
-      const len = Math.hypot(dx, dy)
-      if (len < 0.0001 || speed <= 0) {
-        enemy.setVelocity(0, 0)
-        return
-      }
-      enemy.setVelocity((dx / len) * speed, (dy / len) * speed)
+      const cx = body?.center?.x
+      const cy = body?.center?.y
+      return { x: Number.isFinite(cx) ? (cx as number) : enemy.x, y: Number.isFinite(cy) ? (cy as number) : enemy.y }
     }
 
     const getPlayerVec = () => {
@@ -245,79 +208,20 @@ export class EnemyAISystem {
       const dx = p.x - e.x
       const dy = p.y - e.y
       const dist0 = Math.hypot(dx, dy)
-      // If the player is exactly on top of the bat, pick a stable fallback direction so retreat works.
-      if (dist0 < 0.0001) return { dx: 1, dy: 0, dist: 1 }
+      if (!Number.isFinite(dist0)) return { dx: 0, dy: 0, dist: 0 }
       return { dx, dy, dist: dist0 }
     }
 
-    const pickRetreatDir = () => {
-      const body = enemy.body as Phaser.Physics.Arcade.Body | null
-      const cx = body?.center?.x ?? enemy.x
-      const cy = body?.center?.y ?? enemy.y
-
-      const { dx, dy, dist } = getPlayerVec()
-      // Away from the player.
-      let ax = -dx / dist
-      let ay = -dy / dist
-
-      const probe = 18
-      const can = (vx: number, vy: number) => {
-        const len = Math.hypot(vx, vy)
-        if (len < 0.0001) return false
-        const nx = vx / len
-        const ny = vy / len
-        if (!this.isWorldBlocked) return true
-        return !this.isWorldBlocked(cx + nx * probe, cy + ny * probe)
-      }
-
-      // Try the natural retreat direction first, then slide directions if blocked.
-      const candidates = [
-        { x: ax, y: ay },
-        // Rotate 90 degrees left/right to slide along walls if needed.
-        { x: ay, y: -ax },
-        { x: -ay, y: ax },
-        // Cardinal fallbacks.
-        { x: Math.sign(ax), y: 0 },
-        { x: 0, y: Math.sign(ay) },
-      ]
-
-      const chosen = candidates.find((d) => can(d.x, d.y)) ?? { x: ax, y: ay }
-      const clen = Math.hypot(chosen.x, chosen.y)
-      if (clen < 0.0001) return { x: 1, y: 0 }
-      return { x: chosen.x / clen, y: chosen.y / clen }
-    }
-
-    const startRetreatIfTouching = (now: number) => {
-      if (!isTouchingPlayer()) return false
-      // Always allow a retreat when overlapping so we don't get stuck oscillating at contact distance.
-      if (now < ctx.retreatCooldownUntil) {
-        ctx.retreatCooldownUntil = now
-      }
-      ctx.retreatUntil = now + 360
-      ctx.retreatCooldownUntil = now + 650
-      ctx.retreatDir = pickRetreatDir()
-      return true
-    }
-
-    const chase = () => {
+    const chase = (dt: number) => {
       const speed = enemy.getMoveSpeed()
       const { dx, dy, dist } = getPlayerVec()
-      if (dist < 0.0001 || speed <= 0) {
+      if (dist <= 0.5 || speed <= 0) {
         enemy.setVelocity(0, 0)
         return
       }
-      enemy.setVelocity((dx / dist) * speed, (dy / dist) * speed)
-    }
-
-    const retreat = () => {
-      const speed = enemy.getMoveSpeed()
-      const dir = ctx.retreatDir ?? pickRetreatDir()
-      if (speed <= 0) {
-        enemy.setVelocity(0, 0)
-        return
-      }
-      // Slightly faster than chase so contact creates immediate space.
-      enemy.setVelocity(dir.x * speed * 1.25, dir.y * speed * 1.25)
+      const dtSec = Math.max(0.001, dt / 1000)
+      const maxSpeed = Math.min(speed, dist / dtSec)
+      enemy.setVelocity((dx / dist) * maxSpeed, (dy / dist) * maxSpeed)
     }
 
     const hover = (now: number) => {
@@ -341,14 +245,6 @@ export class EnemyAISystem {
       handlers: {
         hover: {
           onUpdate: (c, now) => {
-            if (shouldLeash()) {
-              fsm.transition('leash', c, now)
-              return
-            }
-            if (startRetreatIfTouching(now)) {
-              fsm.transition('retreat', c, now)
-              return
-            }
             const aggro = enemy.getAggroRadius() || 260
             const { dist } = getPlayerVec()
             if (dist < aggro) {
@@ -359,57 +255,19 @@ export class EnemyAISystem {
           },
         },
         chase: {
-          onUpdate: (c, now) => {
-            if (shouldLeash()) {
-              fsm.transition('leash', c, now)
-              return
-            }
-            if (startRetreatIfTouching(now)) {
-              fsm.transition('retreat', c, now)
-              return
-            }
+          onUpdate: (c, now, dt) => {
             const aggro = enemy.getAggroRadius() || 260
             const { dist } = getPlayerVec()
             if (dist > aggro * 1.15) {
               fsm.transition('hover', c, now)
               return
             }
-            chase()
-          },
-        },
-        retreat: {
-          onUpdate: (c, now) => {
-            if (shouldLeash()) {
-              fsm.transition('leash', c, now)
-              return
-            }
-            if (now >= c.retreatUntil) {
-              const aggro = enemy.getAggroRadius() || 260
-              const { dist } = getPlayerVec()
-              fsm.transition(dist < aggro ? 'chase' : 'hover', c, now)
-              return
-            }
-            retreat()
-          },
-        },
-        leash: {
-          onUpdate: (c, now) => {
-            if (!shouldLeash()) {
-              const aggro = enemy.getAggroRadius() || 260
-              const { dist } = getPlayerVec()
-              fsm.transition(dist < aggro ? 'chase' : 'hover', c, now)
-              return
-            }
-            goHome()
+            chase(dt)
           },
         },
         hitstun: {
           onUpdate: (c, now) => {
             if (now < c.hitstunUntil) return
-            if (shouldLeash()) {
-              fsm.transition('leash', c, now)
-              return
-            }
             const aggro = enemy.getAggroRadius() || 260
             const { dist } = getPlayerVec()
             fsm.transition(dist < aggro ? 'chase' : 'hover', c, now)
@@ -422,9 +280,6 @@ export class EnemyAISystem {
       update: (now, dt) => fsm.update(ctx, now, dt),
       onDamaged: (now) => {
         ctx.hitstunUntil = now + Math.max(0, Math.floor(enemy.getHitstunMs()))
-        // Cancel retreat so the bat doesn't immediately re-enter it after hit-stun ends.
-        ctx.retreatUntil = 0
-        ctx.retreatDir = null
         fsm.transition('hitstun', ctx, now)
       },
     }

@@ -311,6 +311,32 @@ async function waitForMapKey(page, expected, timeoutMs = 2500) {
   throw new Error(`timed out waiting for mapKey=${expected}; last=${await getMapKey(page)}`)
 }
 
+async function waitForWarpReady(page, timeoutMs = 1500) {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const ready = await page.evaluate(() => {
+      const scene = globalThis.__dbg?.player?.scene
+      const health = scene?.health
+      if (!health || typeof health.canWarp !== 'function') return true
+      return health.canWarp()
+    })
+    if (ready) return
+    await page.waitForTimeout(80)
+  }
+  throw new Error('timed out waiting for warp readiness')
+}
+
+async function forceLoadMap(page, mapKey, spawnName = 'player_spawn') {
+  await page.evaluate(
+    ({ mapKey, spawnName }) => {
+      const scene = globalThis.__dbg?.player?.scene
+      if (scene?.mapRuntime?.load) scene.mapRuntime.load(mapKey, spawnName)
+    },
+    { mapKey, spawnName },
+  )
+  await waitForMapKey(page, mapKey, 3000)
+}
+
 async function teleportPlayer(page, x, y) {
   await page.evaluate(
     ({ x, y }) => {
@@ -443,7 +469,78 @@ async function findOpenTileSample(page, radius = 2) {
   )
 }
 
-async function isPlayerOverlappingEnemy(page, kind) {
+async function findChaseSetup(page) {
+  return await page.evaluate(() => {
+    const scene = globalThis.__dbg?.player?.scene
+    const rt = scene?.mapRuntime
+    const map = rt?.state?.map
+    const w = map?.width ?? 0
+    const h = map?.height ?? 0
+    const tile = map?.tileWidth ?? 0
+    if (!(w > 0 && h > 0 && tile > 0)) return null
+
+    const isBlocked = (tx, ty) => (typeof rt?.isTileBlocked === 'function' ? rt.isTileBlocked(tx, ty) : true)
+    const hasLOS =
+      typeof rt?.hasLineOfSight === 'function'
+        ? (x1, y1, x2, y2) => rt.hasLineOfSight(x1, y1, x2, y2)
+        : () => true
+
+    const arenaRadius = 6
+    const arenaSpacing = Math.min(120, tile * (arenaRadius - 2))
+    if (arenaSpacing > 0) {
+      for (let ty = arenaRadius; ty < h - arenaRadius; ty++) {
+        for (let tx = arenaRadius; tx < w - arenaRadius; tx++) {
+          let ok = true
+          for (let dy = -arenaRadius; dy <= arenaRadius; dy++) {
+            for (let dx = -arenaRadius; dx <= arenaRadius; dx++) {
+              if (isBlocked(tx + dx, ty + dy)) {
+                ok = false
+                break
+              }
+            }
+            if (!ok) break
+          }
+          if (!ok) continue
+          const y = ty * tile + tile / 2
+          const x = tx * tile + tile / 2
+          return { player: { x: x - arenaSpacing, y }, bat: { x: x + arenaSpacing, y }, spacing: arenaSpacing }
+        }
+      }
+    }
+
+    const spacingCandidates = [
+      Math.max(120, tile * 6),
+      Math.max(96, tile * 5),
+      Math.max(80, tile * 4),
+      Math.max(64, tile * 3),
+      Math.max(48, tile * 2),
+    ].filter((v, i, arr) => v > 0 && arr.indexOf(v) === i)
+
+    for (const spacing of spacingCandidates) {
+      const margin = Math.ceil(spacing / tile) + 2
+      if (margin >= w - margin || margin >= h - margin) continue
+
+      for (let ty = margin; ty < h - margin; ty++) {
+        for (let tx = margin; tx < w - margin; tx++) {
+          if (isBlocked(tx, ty)) continue
+          const y = ty * tile + tile / 2
+          const x = tx * tile + tile / 2
+          const x1 = x - spacing
+          const x2 = x + spacing
+          const tx1 = Math.floor(x1 / tile)
+          const tx2 = Math.floor(x2 / tile)
+          if (isBlocked(tx1, ty) || isBlocked(tx2, ty)) continue
+          if (!hasLOS(x1, y, x2, y)) continue
+          return { player: { x: x1, y }, bat: { x: x2, y }, spacing }
+        }
+      }
+    }
+
+    return null
+  })
+}
+
+async function isPlayerInTouchRange(page, kind) {
   return await page.evaluate(({ kind }) => {
     const p = globalThis.__dbg?.player
     const pb = p?.body
@@ -452,17 +549,25 @@ async function isPlayerOverlappingEnemy(page, kind) {
     const kids = group?.getChildren?.() ?? []
     const e = kids.find((k) => k?.active && k?.kind === kind)
     const eb = e?.body
-    if (!pb || !eb) return false
-    const pad = 2
-    const pLeft = pb.left - pad
-    const pRight = pb.right + pad
-    const pTop = pb.top - pad
-    const pBottom = pb.bottom + pad
-    const eLeft = eb.left - pad
-    const eRight = eb.right + pad
-    const eTop = eb.top - pad
-    const eBottom = eb.bottom + pad
-    return pLeft <= eRight && pRight >= eLeft && pTop <= eBottom && pBottom >= eTop
+    if (!p || !pb || !e || !eb) return false
+
+    const px = pb.center?.x ?? p.x
+    const py = pb.center?.y ?? p.y
+    const ex = eb.center?.x ?? e.x
+    const ey = eb.center?.y ?? e.y
+
+    const pw = typeof pb.width === 'number' ? pb.width : 0
+    const ph = typeof pb.height === 'number' ? pb.height : 0
+    const pr = Math.max(pw, ph) * 0.5 + 4
+    const er =
+      typeof e.getTouchRadius === 'function'
+        ? e.getTouchRadius()
+        : Math.max(0, Math.max(eb.width ?? 0, eb.height ?? 0) * 0.5)
+
+    const dx = ex - px
+    const dy = ey - py
+    const r = pr + er
+    return dx * dx + dy * dy <= r * r
   }, { kind })
 }
 
@@ -675,6 +780,7 @@ try {
     // Locked door should not warp without a key.
     await teleportPlayer(page, 480, 352)
     await page.waitForTimeout(120)
+    await waitForWarpReady(page)
     await tryInteract(page)
     await page.waitForTimeout(80)
     const dlg0 = await getDialogue(page)
@@ -775,6 +881,7 @@ try {
     if (!(invBeforeDoor && typeof invBeforeDoor.keys === 'number')) throw new Error(`bad inventory snapshot before door: ${JSON.stringify(invBeforeDoor)}`)
     await teleportPlayer(page, 480, 352)
     await page.waitForTimeout(120)
+    await waitForWarpReady(page)
     await tryInteract(page)
     await page.waitForTimeout(200)
     await waitForMapKey(page, 'cave', 3000)
@@ -783,6 +890,7 @@ try {
     if (invAfterDoor.keys !== invBeforeDoor.keys - 1) throw new Error(`expected key consumption on locked warp; before=${invBeforeDoor.keys} after=${invAfterDoor.keys}`)
 
     // Return to overworld so the remaining warp tests are deterministic.
+    await waitForWarpReady(page)
     await teleportPlayer(page, 1312, 800)
     await page.waitForTimeout(220)
     await waitForMapKey(page, 'overworld', 3000)
@@ -911,10 +1019,16 @@ try {
         if (!b0) throw new Error(`bat not found; mapKey=${await getMapKey(page)}; enemiesBefore=${JSON.stringify(enemiesBefore)}`)
 
         const open = await findOpenTileSample(page, 2)
-        if (open) {
-          const spacing = Math.max(120, open.tile * 6)
-          await teleportPlayer(page, open.x - spacing, open.y)
-          await teleportEnemy(page, 'bat', open.x + spacing, open.y)
+        const openPos = open ? { x: open.x, y: open.y, tile: open.tile } : null
+        const chaseSetup = await findChaseSetup(page)
+        if (chaseSetup) {
+          await teleportPlayer(page, chaseSetup.player.x, chaseSetup.player.y)
+          await teleportEnemy(page, 'bat', chaseSetup.bat.x, chaseSetup.bat.y)
+          await page.waitForTimeout(120)
+        } else if (openPos) {
+          const spacing = Math.max(120, openPos.tile * 6)
+          await teleportPlayer(page, openPos.x - spacing, openPos.y)
+          await teleportEnemy(page, 'bat', openPos.x + spacing, openPos.y)
           await page.waitForTimeout(120)
         } else {
           await teleportPlayer(page, b0.x - 120, b0.y)
@@ -925,38 +1039,71 @@ try {
         const enemiesPos0 = await getEnemies(page)
         const b0p = Array.isArray(enemiesPos0) ? enemiesPos0.find((e) => e.kind === 'bat') : null
         if (!p0 || !b0p) throw new Error(`bat/player missing after setup; p0=${JSON.stringify(p0)} b0=${JSON.stringify(b0p)}`)
-        const d0 = Math.hypot(b0p.x - p0.x, b0p.y - p0.y)
         await page.waitForTimeout(900)
         const enemiesAfter = await getEnemies(page)
         const b1 = Array.isArray(enemiesAfter) ? enemiesAfter.find((e) => e.kind === 'bat') : null
         if (!b1) throw new Error(`bat disappeared; mapKey=${await getMapKey(page)}; enemiesAfter=${JSON.stringify(enemiesAfter)}`)
-        const d1 = Math.hypot(b1.x - p0.x, b1.y - p0.y)
-        if (!(d1 < d0)) throw new Error(`expected bat distance to player to decrease; d0=${d0} d1=${d1}`)
 
-        let overlapped = false
-        const touchStart = Date.now()
-        while (Date.now() - touchStart < 1500) {
-          if (await isPlayerOverlappingEnemy(page, 'bat')) {
-            overlapped = true
+        let inRange = false
+        const touchStartDamage = Date.now()
+        while (Date.now() - touchStartDamage < 1500) {
+          if (await isPlayerInTouchRange(page, 'bat')) {
+            inRange = true
             break
           }
           await page.waitForTimeout(80)
         }
-        if (!overlapped) throw new Error('expected bat to reach player (overlap) while chasing')
+        if (!inRange) {
+          const dbg = await page.evaluate(() => {
+            const p = globalThis.__dbg?.player
+            const pb = p?.body
+            const scene = p?.scene
+            const group = scene?.mapRuntime?.enemies
+            const kids = group?.getChildren?.() ?? []
+            const e = kids.find((k) => k?.active && k?.kind === 'bat')
+            const eb = e?.body
+            return {
+              player: p ? { x: p.x, y: p.y, cx: pb?.center?.x ?? null, cy: pb?.center?.y ?? null } : null,
+              bat: e
+                ? {
+                    x: e.x,
+                    y: e.y,
+                    cx: eb?.center?.x ?? null,
+                    cy: eb?.center?.y ?? null,
+                    vx: eb?.velocity?.x ?? null,
+                    vy: eb?.velocity?.y ?? null,
+                    speed: e?.stats?.moveSpeed ?? null,
+                    aggro: e?.stats?.aggroRadius ?? null,
+                  }
+                : null,
+            }
+          })
+          throw new Error(`expected bat to reach touch range while chasing; dbg=${JSON.stringify(dbg)}`)
+        }
 
-        // Contact behavior: if we force a touch, bat should retreat briefly (distance increases).
-        await teleportPlayer(page, b1.x, b1.y)
-        await page.waitForTimeout(120)
-        const enemiesTouch0 = await getEnemies(page)
-        const bt0 = Array.isArray(enemiesTouch0) ? enemiesTouch0.find((e) => e.kind === 'bat') : null
-        if (!bt0) throw new Error('bat missing after touch setup')
-        const dist0 = Math.hypot(bt0.x - b1.x, bt0.y - b1.y)
-        await page.waitForTimeout(380)
-        const enemiesTouch1 = await getEnemies(page)
-        const bt1 = Array.isArray(enemiesTouch1) ? enemiesTouch1.find((e) => e.kind === 'bat') : null
-        if (!bt1) throw new Error('bat missing after touch')
-        const dist1 = Math.hypot(bt1.x - b1.x, bt1.y - b1.y)
-        if (!(dist1 > dist0 + 8)) throw new Error(`expected bat to retreat after touch; dist0=${dist0} dist1=${dist1}`)
+        // Touch damage should register even on diagonal approaches.
+        const maxHp = await getPlayerMaxHp(page)
+        if (typeof maxHp === 'number') await setPlayerHp(page, maxHp)
+        await page.waitForTimeout(900)
+        if (openPos) {
+          await teleportPlayer(page, openPos.x, openPos.y)
+          await teleportEnemy(page, 'bat', openPos.x + Math.max(90, openPos.tile * 4), openPos.y + Math.max(90, openPos.tile * 4))
+          await page.waitForTimeout(120)
+        }
+        const hp0 = await getPlayerHp(page)
+        if (typeof hp0 !== 'number') throw new Error(`hp0 not numeric before bat touch; hp0=${hp0}`)
+        let hp1 = hp0
+        const touchStart = Date.now()
+        while (Date.now() - touchStart < 1500) {
+          const hpNow = await getPlayerHp(page)
+          if (typeof hpNow === 'number') {
+            hp1 = hpNow
+            if (hpNow < hp0) break
+          }
+          await page.waitForTimeout(120)
+        }
+        if (!(hp1 < hp0)) throw new Error(`expected bat touch damage on chase; hp0=${hp0} hp1=${hp1}`)
+
 	      } catch (e) {
 	        errors.push(`expected bat chase behavior (AI); ${String(e?.message ?? e)}`)
 	      }
@@ -1138,16 +1285,8 @@ try {
 		    }
 
         // Reset enemy spawns so weapon damage assertions are deterministic (fresh HP, no invuln carry-over).
-        // Overworld fast warp loop: overworld -> cave -> overworld.
-        await teleportPlayer(page, 100, 100)
-        await page.waitForTimeout(120)
-        await page.waitForTimeout(650)
-        await teleportPlayer(page, 288, 352)
-        await page.waitForTimeout(220)
-        await waitForMapKey(page, 'cave', 3000)
-        await teleportPlayer(page, 352, 288)
-        await page.waitForTimeout(220)
-        await waitForMapKey(page, 'overworld', 3000)
+        await forceLoadMap(page, 'cave')
+        await forceLoadMap(page, 'overworld')
 	
 		    // Weapon stats sanity: swapping weapons should change damage output.
 		    try {
@@ -1166,17 +1305,8 @@ try {
       let enemiesStart = await getEnemies(page)
       let hasBat = Array.isArray(enemiesStart) ? enemiesStart.some((e) => e.kind === 'bat') : false
       if (!hasBat) {
-        await teleportPlayer(page, 100, 100)
-        await page.waitForTimeout(120)
-        await page.waitForTimeout(650)
-
-        // Overworld fast warp loop: overworld -> cave -> overworld.
-        await teleportPlayer(page, 288, 352)
-        await page.waitForTimeout(220)
-        await waitForMapKey(page, 'cave', 3000)
-        await teleportPlayer(page, 352, 288)
-        await page.waitForTimeout(220)
-        await waitForMapKey(page, 'overworld', 3000)
+        await forceLoadMap(page, 'cave')
+        await forceLoadMap(page, 'overworld')
 
         enemiesStart = await getEnemies(page)
         hasBat = Array.isArray(enemiesStart) ? enemiesStart.some((e) => e.kind === 'bat') : false
@@ -1209,16 +1339,8 @@ try {
       let enemiesStart = await getEnemies(page)
       let hasBat = Array.isArray(enemiesStart) ? enemiesStart.some((e) => e.kind === 'bat') : false
       if (!hasBat) {
-        // Overworld fast warp loop: overworld -> cave -> overworld.
-        await teleportPlayer(page, 100, 100)
-        await page.waitForTimeout(120)
-        await page.waitForTimeout(650)
-        await teleportPlayer(page, 288, 352)
-        await page.waitForTimeout(220)
-        await waitForMapKey(page, 'cave', 3000)
-        await teleportPlayer(page, 352, 288)
-        await page.waitForTimeout(220)
-        await waitForMapKey(page, 'overworld', 3000)
+        await forceLoadMap(page, 'cave')
+        await forceLoadMap(page, 'overworld')
         enemiesStart = await getEnemies(page)
         hasBat = Array.isArray(enemiesStart) ? enemiesStart.some((e) => e.kind === 'bat') : false
       }
@@ -1307,25 +1429,16 @@ try {
 	      if (!(inv0 && typeof inv0.coins === 'number')) throw new Error(`bad inventory snapshot before loot: ${JSON.stringify(inv0)}`)
 	      let enemiesStart = await getEnemies(page)
 	      let hasSlime = Array.isArray(enemiesStart) ? enemiesStart.some((e) => e.kind === 'slime') : false
-	      if (!hasSlime) {
-	        // Earlier suites may legitimately kill both overworld enemies (bat greatsword test can kill the bat,
-	        // and if the slime wanders too close it can get hit as collateral). Reload the map enemies so this
-	        // test always validates loot drops deterministically.
-	        await teleportPlayer(page, 100, 100)
-	        await page.waitForTimeout(120)
-	        await page.waitForTimeout(650)
+      if (!hasSlime) {
+        // Earlier suites may legitimately kill both overworld enemies (bat greatsword test can kill the bat,
+        // and if the slime wanders too close it can get hit as collateral). Reload the map enemies so this
+        // test always validates loot drops deterministically.
+        await forceLoadMap(page, 'cave')
+        await forceLoadMap(page, 'overworld')
 
-	        // Overworld fast warp loop: overworld -> cave -> overworld.
-	        await teleportPlayer(page, 288, 352)
-	        await page.waitForTimeout(220)
-	        await waitForMapKey(page, 'cave', 3000)
-	        await teleportPlayer(page, 352, 288)
-	        await page.waitForTimeout(220)
-	        await waitForMapKey(page, 'overworld', 3000)
-
-	        enemiesStart = await getEnemies(page)
-	        hasSlime = Array.isArray(enemiesStart) ? enemiesStart.some((e) => e.kind === 'slime') : false
-	      }
+        enemiesStart = await getEnemies(page)
+        hasSlime = Array.isArray(enemiesStart) ? enemiesStart.some((e) => e.kind === 'slime') : false
+      }
 	      if (!hasSlime) throw new Error(`slime not found for loot test; enemies=${JSON.stringify(enemiesStart)}`)
 	      const ok = await killEnemy(page, 'slime', 10)
 	      if (!ok) throw new Error('failed to kill slime for loot test')
@@ -1407,6 +1520,7 @@ try {
     errors.push(`expected to stabilize to overworld; ${String(e?.message ?? e)}`)
   }
 
+  await waitForWarpReady(page)
   await teleportPlayer(page, 1312, 800)
   await page.waitForTimeout(200)
   try {
@@ -1479,6 +1593,7 @@ try {
     errors.push(`expected game over + respawn; ${String(e?.message ?? e)}`)
   }
 
+  await waitForWarpReady(page)
   await teleportPlayer(page, 1312, 800)
   await page.waitForTimeout(200)
   try {
@@ -1488,6 +1603,7 @@ try {
   }
 
   // New fast warp (near overworld spawn): x=256..320, y=320..384.
+  await waitForWarpReady(page)
   await teleportPlayer(page, 288, 352)
   await page.waitForTimeout(200)
   try {
@@ -1497,6 +1613,7 @@ try {
   }
 
   // Fast return warp in cave: x=320..384,y=256..320.
+  await waitForWarpReady(page)
   await teleportPlayer(page, 352, 288)
   await page.waitForTimeout(200)
   try {
