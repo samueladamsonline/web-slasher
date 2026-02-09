@@ -7,7 +7,15 @@ import { getTiledNumber, getTiledProp, type TiledProps } from '../game/tiled'
 
 type EnemyStats = Pick<
   EnemyDef,
-  'invulnMs' | 'hitstunMs' | 'knockback' | 'moveSpeed' | 'leashRadius' | 'touchDamage' | 'touchKnockback' | 'aggroRadius'
+  | 'invulnMs'
+  | 'hitstunMs'
+  | 'knockback'
+  | 'moveSpeed'
+  | 'leashRadius'
+  | 'touchDamage'
+  | 'touchKnockback'
+  | 'touchRadius'
+  | 'aggroRadius'
 >
 
 export class Enemy extends Phaser.Physics.Arcade.Sprite {
@@ -33,6 +41,7 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
       leashRadius: def.leashRadius,
       touchDamage: def.touchDamage,
       touchKnockback: def.touchKnockback,
+      touchRadius: def.touchRadius,
       aggroRadius: def.aggroRadius,
     }
 
@@ -64,6 +73,18 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
 
   getTouchKnockback() {
     return this.stats.touchKnockback
+  }
+
+  getTouchRadius() {
+    if (typeof this.stats.touchRadius === 'number' && Number.isFinite(this.stats.touchRadius)) {
+      return Math.max(0, this.stats.touchRadius)
+    }
+    const body = this.body as Phaser.Physics.Arcade.Body | undefined
+    const w = typeof body?.width === 'number' ? body.width : 0
+    const h = typeof body?.height === 'number' ? body.height : 0
+    const r = Math.max(w, h) * 0.5
+    // Small padding so visual contact is more likely to register.
+    return Math.max(8, r + 4)
   }
 
   getMoveSpeed() {
@@ -164,6 +185,8 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     if (typeof touchDmgRaw === 'number') enemy.stats.touchDamage = Math.max(0, Math.floor(touchDmgRaw))
     const touchKbRaw = getTiledNumber(props, 'touchKnockback')
     if (typeof touchKbRaw === 'number') enemy.stats.touchKnockback = Math.max(0, touchKbRaw)
+    const touchRadiusRaw = getTiledNumber(props, 'touchRadius')
+    if (typeof touchRadiusRaw === 'number') enemy.stats.touchRadius = Math.max(0, touchRadiusRaw)
     const invulnRaw = getTiledNumber(props, 'invulnMs')
     if (typeof invulnRaw === 'number') enemy.stats.invulnMs = Math.max(0, invulnRaw)
     const kbRaw = getTiledNumber(props, 'knockback')

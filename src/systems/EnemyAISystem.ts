@@ -181,6 +181,44 @@ export class EnemyAISystem {
   private createBatController(enemy: Enemy): EnemyController {
     const ctx: BatCtx = { enemy, hitstunUntil: 0, retreatUntil: 0, retreatCooldownUntil: 0, retreatDir: null }
 
+    const getPlayerCenter = () => {
+      const body = this.player.body as Phaser.Physics.Arcade.Body | undefined
+      return { x: body?.center?.x ?? this.player.x, y: body?.center?.y ?? this.player.y }
+    }
+
+    const getPlayerRadius = () => {
+      const body = this.player.body as Phaser.Physics.Arcade.Body | undefined
+      const w = typeof body?.width === 'number' ? body.width : 0
+      const h = typeof body?.height === 'number' ? body.height : 0
+      return Math.max(w, h) * 0.5
+    }
+
+    const getEnemyCenter = () => {
+      const body = enemy.body as Phaser.Physics.Arcade.Body | undefined
+      return { x: body?.center?.x ?? enemy.x, y: body?.center?.y ?? enemy.y }
+    }
+
+    const isTouchingPlayer = () => {
+      const pb = this.player.body as Phaser.Physics.Arcade.Body | undefined
+      const eb = enemy.body as Phaser.Physics.Arcade.Body | undefined
+      if (pb && eb) {
+        const pad = 2
+        const pLeft = pb.left - pad
+        const pRight = pb.right + pad
+        const pTop = pb.top - pad
+        const pBottom = pb.bottom + pad
+        const eLeft = eb.left - pad
+        const eRight = eb.right + pad
+        const eTop = eb.top - pad
+        const eBottom = eb.bottom + pad
+        return pLeft <= eRight && pRight >= eLeft && pTop <= eBottom && pBottom >= eTop
+      }
+
+      const { dist } = getPlayerVec()
+      const touchDist = getPlayerRadius() + enemy.getTouchRadius() + 2
+      return dist < touchDist
+    }
+
     const shouldLeash = () => {
       const leash = enemy.getLeashRadius()
       if (!(leash > 0)) return false
@@ -202,8 +240,10 @@ export class EnemyAISystem {
     }
 
     const getPlayerVec = () => {
-      const dx = this.player.x - enemy.x
-      const dy = this.player.y - enemy.y
+      const p = getPlayerCenter()
+      const e = getEnemyCenter()
+      const dx = p.x - e.x
+      const dy = p.y - e.y
       const dist0 = Math.hypot(dx, dy)
       // If the player is exactly on top of the bat, pick a stable fallback direction so retreat works.
       if (dist0 < 0.0001) return { dx: 1, dy: 0, dist: 1 }
@@ -248,13 +288,11 @@ export class EnemyAISystem {
     }
 
     const startRetreatIfTouching = (now: number) => {
-      const { dist } = getPlayerVec()
-      const touchDist = 44
-      if (dist >= touchDist) return false
-      // If we're directly on top of the player, always allow a retreat even during cooldown
-      // so the bat doesn't get "stuck" oscillating at contact distance.
-      const superClose = dist < 14
-      if (!superClose && now < ctx.retreatCooldownUntil) return false
+      if (!isTouchingPlayer()) return false
+      // Always allow a retreat when overlapping so we don't get stuck oscillating at contact distance.
+      if (now < ctx.retreatCooldownUntil) {
+        ctx.retreatCooldownUntil = now
+      }
       ctx.retreatUntil = now + 360
       ctx.retreatCooldownUntil = now + 650
       ctx.retreatDir = pickRetreatDir()

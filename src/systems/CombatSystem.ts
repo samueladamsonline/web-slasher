@@ -115,6 +115,7 @@ export class CombatSystem {
   private player: Phaser.Physics.Arcade.Sprite
   private getFacing: () => Facing
   private getWeapon?: () => WeaponDef | null
+  private getAttackDamage?: () => number
   private hasLineOfSight?: (fromX: number, fromY: number, toX: number, toY: number) => boolean
   private debugHitbox: boolean
 
@@ -127,6 +128,7 @@ export class CombatSystem {
     opts: {
       getFacing: () => Facing
       getWeapon?: () => WeaponDef | null
+      getAttackDamage?: () => number
       debugHitbox?: boolean
       hasLineOfSight?: (fromX: number, fromY: number, toX: number, toY: number) => boolean
     },
@@ -135,6 +137,7 @@ export class CombatSystem {
     this.player = player
     this.getFacing = opts.getFacing
     this.getWeapon = opts.getWeapon
+    this.getAttackDamage = opts.getAttackDamage
     this.hasLineOfSight = opts.hasLineOfSight
     this.debugHitbox = !!opts.debugHitbox
   }
@@ -154,6 +157,8 @@ export class CombatSystem {
 
     const weapon = this.getWeapon ? this.getWeapon() : null
     if (!weapon) return
+    const attackDamageRaw = this.getAttackDamage ? this.getAttackDamage() : weapon.damage
+    const attackDamage = Number.isFinite(attackDamageRaw) ? Math.max(0, Math.floor(attackDamageRaw)) : 0
 
     const pBody = this.player.body as Phaser.Physics.Arcade.Body | undefined
     const px = pBody?.center?.x ?? this.player.x
@@ -186,7 +191,7 @@ export class CombatSystem {
         const ey = eBody?.center?.y ?? go.y
         if (!this.hasLineOfSight(px, py, ex, ey)) continue
       }
-      if (go.damage(this.scene.time.now, this.player.x, this.player.y, weapon.damage)) {
+      if (attackDamage > 0 && go.damage(this.scene.time.now, this.player.x, this.player.y, attackDamage)) {
         this.lastAttack.hits++
         this.spawnHitSpark(go.x, go.y)
       }
@@ -244,24 +249,10 @@ export class CombatSystem {
     const rotByFacing: Record<Facing, number> = { right: 0, down: Math.PI / 2, left: Math.PI, up: -Math.PI / 2 }
     const baseRot = rotByFacing[facing]
 
-    const sword = this.scene.add.image(this.player.x, this.player.y, weapon.vfx.weaponTexture).setDepth(DEPTH_HITBOX).setAlpha(1)
-    sword.setOrigin(0.2, 0.5)
-    sword.setRotation(baseRot)
-
     const slash = this.scene.add.image(hx, hy, weapon.vfx.slashTexture).setDepth(DEPTH_HITBOX).setAlpha(0.6)
     slash.setBlendMode(Phaser.BlendModes.ADD)
     slash.setRotation(baseRot)
     slash.setScale(weapon.vfx.slashScale)
-
-    const swordOffset = 22
-    const sx = this.player.x + Math.cos(baseRot) * swordOffset
-    const sy = this.player.y + Math.sin(baseRot) * swordOffset
-    sword.setPosition(sx, sy)
-
-    const swing = 0.55
-    const from = baseRot - swing
-    const to = baseRot + swing
-    sword.setRotation(from)
 
     this.scene.tweens.add({
       targets: slash,
@@ -272,12 +263,5 @@ export class CombatSystem {
       onComplete: () => slash.destroy(),
     })
 
-    this.scene.tweens.add({
-      targets: sword,
-      rotation: { from, to },
-      duration: 120,
-      ease: 'sine.inOut',
-      onComplete: () => sword.destroy(),
-    })
   }
 }

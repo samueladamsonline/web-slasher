@@ -12,6 +12,7 @@ export class PlayerHealthSystem {
   private hp = 5
   private invulnUntil = 0
   private touchInvulnMs = 800
+  private touchRadiusPadding = 4
   private warpLockUntil = 0
 
   private overlap?: Phaser.Physics.Arcade.Collider
@@ -76,7 +77,37 @@ export class PlayerHealthSystem {
 
   update() {
     // Touch damage is driven by the physics overlap callback set up in onMapChanged().
-    // Keeping this update hook in case we add non-overlap health effects later.
+    // We also do a lightweight proximity check so fast/small enemies don't "tunnel" past
+    // the player without triggering overlap.
+    const now = this.scene.time.now
+    if (now < this.invulnUntil) return
+
+    const group = this.getEnemyGroup()
+    if (!group) return
+
+    const pBody = this.player.body as Phaser.Physics.Arcade.Body | undefined
+    const px = pBody?.center?.x ?? this.player.x
+    const py = pBody?.center?.y ?? this.player.y
+    const pw = typeof pBody?.width === 'number' ? pBody.width : 0
+    const ph = typeof pBody?.height === 'number' ? pBody.height : 0
+    const pr = Math.max(pw, ph) * 0.5 + this.touchRadiusPadding
+
+    const enemies = group.getChildren() as unknown as Phaser.GameObjects.GameObject[]
+    for (const go of enemies) {
+      if (!(go instanceof Enemy)) continue
+      if (!go.active) continue
+      const body = go.body as Phaser.Physics.Arcade.Body | null
+      if (!body || !body.enable) continue
+      const ex = body?.center?.x ?? go.x
+      const ey = body?.center?.y ?? go.y
+      const dx = ex - px
+      const dy = ey - py
+      const r = pr + go.getTouchRadius()
+      if (dx * dx + dy * dy <= r * r) {
+        this.tryTouchDamage(go)
+        if (this.scene.time.now < this.invulnUntil) return
+      }
+    }
   }
 
   private tryTouchDamage(enemy: Enemy) {

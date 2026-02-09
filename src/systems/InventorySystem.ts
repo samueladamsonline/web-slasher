@@ -295,6 +295,11 @@ export class InventorySystem {
     return wid ? WEAPONS[wid] : null
   }
 
+  getAttackDamage() {
+    const weapon = this.getWeaponDef()
+    return weapon ? weapon.damage : 0
+  }
+
   equipWeapon(wid: WeaponId) {
     // If already equipped, nothing to do.
     const current = this.getEquippedWeaponId()

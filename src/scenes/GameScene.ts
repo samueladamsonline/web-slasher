@@ -2,6 +2,7 @@ import * as Phaser from 'phaser'
 import { MapRuntime } from '../game/MapRuntime'
 import { Enemy } from '../entities/Enemy'
 import { Hero } from '../entities/Hero'
+import { HeroGear } from '../entities/HeroGear'
 import { EnemyAISystem } from '../systems/EnemyAISystem'
 import { InteractionSystem } from '../systems/InteractionSystem'
 import { InputSystem } from '../systems/InputSystem'
@@ -43,6 +44,7 @@ export class GameScene extends Phaser.Scene {
   private minimap!: MinimapUI
   private overlay!: OverlayUI
   private inventoryUI!: InventoryUI
+  private heroGear?: HeroGear
 
   private startMenu = true
   private startLoading = true
@@ -99,6 +101,7 @@ export class GameScene extends Phaser.Scene {
 
     this.world = new WorldState()
     this.inventory = new InventorySystem()
+    this.heroGear = new HeroGear(this, this.hero, this.inventory)
     this.inventoryUI = new InventoryUI(this, this.inventory)
     this.save = new SaveSystem({
       inventory: this.inventory,
@@ -128,6 +131,7 @@ export class GameScene extends Phaser.Scene {
     this.combat = new CombatSystem(this, this.hero, {
       getFacing: () => this.hero.getFacing(),
       getWeapon: () => this.inventory.getWeaponDef(),
+      getAttackDamage: () => this.inventory.getAttackDamage(),
       debugHitbox,
       hasLineOfSight: (fromX, fromY, toX, toY) => this.mapRuntime.hasLineOfSight(fromX, fromY, toX, toY),
     })
@@ -192,6 +196,7 @@ export class GameScene extends Phaser.Scene {
     this.dialogueUI?.destroy?.()
     this.promptUI?.destroy?.()
     this.overlay?.destroy?.()
+    this.heroGear?.destroy?.()
 
     // Avoid leaking references to dead objects into tests/devtools between restarts.
     if (typeof window !== 'undefined') {
@@ -268,6 +273,7 @@ export class GameScene extends Phaser.Scene {
     const attackPressedRaw = attackJustPressed || this.debugAttackQueued
     const attackPressed = !!weapon && attackPressedRaw && this.combat.canAttack()
     const res = this.hero.updateFsm(this.time.now, delta, { vx, vy, attackPressed }, { moveSpeed: this.speed, attackTiming: weapon?.timings })
+    this.heroGear?.update(res.didStartAttack)
     // Keep debug attacks queued until an attack actually starts, so tests don't flake on timing/locks.
     if (!weapon) this.debugAttackQueued = false
     else if (res.didStartAttack) this.debugAttackQueued = false

@@ -29,6 +29,8 @@ export type EnemyDef = {
   leashRadius?: number
   touchDamage: number
   touchKnockback: number
+  // Optional hurtbox radius used for touch damage checks (world px).
+  touchRadius?: number
   aggroRadius?: number
   body: { w: number; h: number; ox: number; oy: number }
   drops?: LootTable
@@ -44,7 +46,7 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
     knockback: 220,
     moveSpeed: 55,
     leashRadius: 140,
-    touchDamage: 1,
+    touchDamage: 2,
     touchKnockback: 260,
     body: { w: 34, h: 22, ox: (44 - 34) / 2, oy: 34 - 22 - 4 },
     drops: [

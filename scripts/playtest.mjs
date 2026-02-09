@@ -405,6 +405,67 @@ async function findWallTileSample(page) {
   })
 }
 
+async function findOpenTileSample(page, radius = 2) {
+  return await page.evaluate(
+    ({ radius }) => {
+      const scene = globalThis.__dbg?.player?.scene
+      const rt = scene?.mapRuntime
+      const map = rt?.state?.map
+      const w = map?.width ?? 0
+      const h = map?.height ?? 0
+      const tile = map?.tileWidth ?? 0
+      if (!(w > 0 && h > 0 && tile > 0)) return null
+
+      const isBlocked = (tx, ty) => (typeof rt?.isTileBlocked === 'function' ? rt.isTileBlocked(tx, ty) : true)
+
+      for (let ty = radius; ty < h - radius; ty++) {
+        for (let tx = radius; tx < w - radius; tx++) {
+          let ok = true
+          for (let dy = -radius; dy <= radius; dy++) {
+            for (let dx = -radius; dx <= radius; dx++) {
+              if (isBlocked(tx + dx, ty + dy)) {
+                ok = false
+                break
+              }
+            }
+            if (!ok) break
+          }
+          if (!ok) continue
+          const x = tx * tile + tile / 2
+          const y = ty * tile + tile / 2
+          return { tx, ty, x, y, tile }
+        }
+      }
+
+      return null
+    },
+    { radius },
+  )
+}
+
+async function isPlayerOverlappingEnemy(page, kind) {
+  return await page.evaluate(({ kind }) => {
+    const p = globalThis.__dbg?.player
+    const pb = p?.body
+    const scene = p?.scene
+    const group = scene?.mapRuntime?.enemies
+    const kids = group?.getChildren?.() ?? []
+    const e = kids.find((k) => k?.active && k?.kind === kind)
+    const eb = e?.body
+    if (!pb || !eb) return false
+    const pad = 2
+    const pLeft = pb.left - pad
+    const pRight = pb.right + pad
+    const pTop = pb.top - pad
+    const pBottom = pb.bottom + pad
+    const eLeft = eb.left - pad
+    const eRight = eb.right + pad
+    const eTop = eb.top - pad
+    const eBottom = eb.bottom + pad
+    return pLeft <= eRight && pRight >= eLeft && pTop <= eBottom && pBottom >= eTop
+  }, { kind })
+}
+
 const server = await createServer({
   server: { host: '127.0.0.1', port: PORT, strictPort: true },
   clearScreen: false,
@@ -848,15 +909,40 @@ try {
         const enemiesBefore = await getEnemies(page)
         const b0 = Array.isArray(enemiesBefore) ? enemiesBefore.find((e) => e.kind === 'bat') : null
         if (!b0) throw new Error(`bat not found; mapKey=${await getMapKey(page)}; enemiesBefore=${JSON.stringify(enemiesBefore)}`)
-        await teleportPlayer(page, b0.x - 120, b0.y)
-        await page.waitForTimeout(120)
-        const d0 = Math.hypot(b0.x - (b0.x - 120), b0.y - b0.y)
+
+        const open = await findOpenTileSample(page, 2)
+        if (open) {
+          const spacing = Math.max(120, open.tile * 6)
+          await teleportPlayer(page, open.x - spacing, open.y)
+          await teleportEnemy(page, 'bat', open.x + spacing, open.y)
+          await page.waitForTimeout(120)
+        } else {
+          await teleportPlayer(page, b0.x - 120, b0.y)
+          await page.waitForTimeout(120)
+        }
+
+        const p0 = await getPlayerPos(page)
+        const enemiesPos0 = await getEnemies(page)
+        const b0p = Array.isArray(enemiesPos0) ? enemiesPos0.find((e) => e.kind === 'bat') : null
+        if (!p0 || !b0p) throw new Error(`bat/player missing after setup; p0=${JSON.stringify(p0)} b0=${JSON.stringify(b0p)}`)
+        const d0 = Math.hypot(b0p.x - p0.x, b0p.y - p0.y)
         await page.waitForTimeout(900)
         const enemiesAfter = await getEnemies(page)
         const b1 = Array.isArray(enemiesAfter) ? enemiesAfter.find((e) => e.kind === 'bat') : null
         if (!b1) throw new Error(`bat disappeared; mapKey=${await getMapKey(page)}; enemiesAfter=${JSON.stringify(enemiesAfter)}`)
-        const d1 = Math.hypot(b1.x - (b0.x - 120), b1.y - b0.y)
+        const d1 = Math.hypot(b1.x - p0.x, b1.y - p0.y)
         if (!(d1 < d0)) throw new Error(`expected bat distance to player to decrease; d0=${d0} d1=${d1}`)
+
+        let overlapped = false
+        const touchStart = Date.now()
+        while (Date.now() - touchStart < 1500) {
+          if (await isPlayerOverlappingEnemy(page, 'bat')) {
+            overlapped = true
+            break
+          }
+          await page.waitForTimeout(80)
+        }
+        if (!overlapped) throw new Error('expected bat to reach player (overlap) while chasing')
 
         // Contact behavior: if we force a touch, bat should retreat briefly (distance increases).
         await teleportPlayer(page, b1.x, b1.y)
@@ -959,7 +1045,7 @@ try {
         await page.waitForTimeout(320)
         const hp1 = await getPlayerHp(page)
         if (!(typeof hp0 === 'number' && typeof hp1 === 'number')) throw new Error(`hp not numeric; hp0=${hp0} hp1=${hp1}`)
-        if (!(hp1 === hp0 - 1)) throw new Error(`expected hp drop by 1 on contact; hp0=${hp0} hp1=${hp1}`)
+        if (!(hp1 === hp0 - 2)) throw new Error(`expected hp drop by 2 on contact; hp0=${hp0} hp1=${hp1}`)
 
         // Immediately collide again; should not drop again due to invuln.
         const enemiesNow1 = await getEnemies(page)
