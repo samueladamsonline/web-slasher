@@ -1,4 +1,5 @@
-export const TILE_SIZE = 64
+// Canonical tile size (in world pixels). Keep this aligned with the Tiled JSON maps.
+export const TILE_SIZE = 16
 
 export const HERO_W = 48
 export const HERO_H = 72

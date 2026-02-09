@@ -354,13 +354,54 @@ async function getEnemiesInBlockedTiles(page) {
       const body = e.body
       const cx = body?.center?.x ?? e.x
       const cy = body?.center?.y ?? e.y
-      const tx = Math.floor(cx / 64)
-      const ty = Math.floor(cy / 64)
-      const blocked = typeof rt?.isTileBlocked === 'function' ? rt.isTileBlocked(tx, ty) : false
-      if (blocked) out.push({ kind: e?.kind ?? null, x: e.x, y: e.y, cx, cy, tx, ty })
+      const blocked = typeof rt?.isWorldBlocked === 'function' ? rt.isWorldBlocked(cx, cy) : false
+      if (blocked) out.push({ kind: e?.kind ?? null, x: e.x, y: e.y, cx, cy })
     }
 
     return out
+  })
+}
+
+async function findWallTileSample(page) {
+  // Find a blocked tile run (wall segment) that has open tiles immediately to its left and right.
+  // This makes tests robust against map edits and tile-size changes.
+  return await page.evaluate(() => {
+    const scene = globalThis.__dbg?.player?.scene
+    const rt = scene?.mapRuntime
+    const map = rt?.state?.map
+    const w = map?.width ?? 0
+    const h = map?.height ?? 0
+    const tile = map?.tileWidth ?? 0
+    if (!(w > 0 && h > 0 && tile > 0)) return null
+
+    // Avoid edges so follow-up tests can offset around the wall without leaving the world bounds.
+    const margin = 6
+    const isBlocked = (tx, ty) => (typeof rt?.isTileBlocked === 'function' ? rt.isTileBlocked(tx, ty) : false)
+
+    for (let ty = margin; ty < h - margin; ty++) {
+      let tx = margin
+      while (tx < w - margin) {
+        if (!isBlocked(tx, ty)) {
+          tx++
+          continue
+        }
+
+        const startTx = tx
+        while (tx < w - margin && isBlocked(tx, ty)) tx++
+        const endTx = tx - 1
+
+        const openL = !isBlocked(startTx - 1, ty)
+        const openR = !isBlocked(endTx + 1, ty)
+        if (!openL || !openR) continue
+
+        const wallLeft = startTx * tile
+        const wallRight = (endTx + 1) * tile
+        const y = ty * tile + tile / 2
+        return { startTx, endTx, ty, tile, wallLeft, wallRight, y }
+      }
+    }
+
+    return null
   })
 }
 
@@ -725,13 +766,11 @@ try {
     // Stress this by forcing the bat to chase into an internal wall for a bit.
     if (bat) {
       try {
-        // Internal wall tile at (12,7) is blocked in the overworld map JSON.
-        const TILE = 64
-        const wallTx = 12
-        const wallTy = 7
-        const wallLeft = wallTx * TILE
-        const wallRight = wallLeft + TILE
-        const y = wallTy * TILE + TILE / 2
+        const wall = await findWallTileSample(page)
+        if (!wall) throw new Error('could not find a suitable blocked wall tile for collision test')
+        const wallLeft = wall.wallLeft
+        const wallRight = wall.wallRight
+        const y = wall.y
 
         await teleportPlayer(page, wallLeft - 150, y)
         await teleportEnemy(page, 'bat', wallRight + 90, y)
@@ -1000,13 +1039,12 @@ try {
         }
       })
 
-      // Internal wall tile at (12,7) is blocked. Place the hero and bat on opposite sides.
-      const TILE = 64
-      const wallTx = 12
-      const wallTy = 7
-      const wallLeft = wallTx * TILE
-      const wallRight = wallLeft + TILE
-      const y = wallTy * TILE + TILE / 2
+      // Place the hero and bat on opposite sides of a blocked tile.
+      const wall = await findWallTileSample(page)
+      if (!wall) throw new Error('could not find a suitable blocked wall tile for occlusion test')
+      const wallLeft = wall.wallLeft
+      const wallRight = wall.wallRight
+      const y = wall.y
 
       // Place player so their body is flush with the left side of the wall.
       await teleportPlayer(page, wallLeft - 14, y)
