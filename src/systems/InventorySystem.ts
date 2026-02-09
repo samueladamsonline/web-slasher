@@ -194,6 +194,13 @@ export class InventorySystem {
       bag = normalized.bag
     }
 
+    // Migration/starter-kit safety: ensure the player owns at least one basic shield.
+    // This keeps older saves compatible with the new equipment model.
+    if (equipment.shield !== 'shield_basic' && !bag.some((s) => s?.id === 'shield_basic')) {
+      const empty = bag.findIndex((s) => !s)
+      if (empty >= 0) bag[empty] = { id: 'shield_basic', qty: 1 }
+    }
+
     this.coins = coins
     this.keys = keys
     this.equipment = equipment
