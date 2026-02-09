@@ -1182,10 +1182,29 @@ try {
         if (!(typeof dReturn === 'number' && dReturn < dAway - 6))
           throw new Error(`expected bat to return toward spawn after deaggro; dAway=${dAway} dReturn=${dReturn}`)
 
-	      } catch (e) {
-	        errors.push(`expected bat chase behavior (AI); ${String(e?.message ?? e)}`)
-	      }
-	    }
+        // Re-aggro sanity: if the player re-enters aggro while the bat is returning home,
+        // it should chase again (not stay in a "return forever" mode).
+        const maxHp2 = await getPlayerMaxHp(page)
+        if (typeof maxHp2 === 'number') await setPlayerHp(page, maxHp2)
+        await page.waitForTimeout(80)
+
+        await teleportPlayer(page, spawn.x - 120, spawn.y)
+        await page.waitForTimeout(120)
+        let reAggroTouch = false
+        const reAggroStart = Date.now()
+        while (Date.now() - reAggroStart < 2200) {
+          if (await isPlayerInTouchRange(page, 'bat')) {
+            reAggroTouch = true
+            break
+          }
+          await page.waitForTimeout(80)
+        }
+        if (!reAggroTouch) throw new Error('expected bat to re-aggro when player re-enters range')
+
+		      } catch (e) {
+		        errors.push(`expected bat chase behavior (AI); ${String(e?.message ?? e)}`)
+		      }
+		    }
 
     // Enemy collision sanity: enemies should never end up inside blocked tiles.
     // Stress this by forcing the bat to chase into an internal wall for a bit.

@@ -358,6 +358,17 @@ export class EnemyAISystem {
         },
         return: {
           onUpdate: (c, now, dt) => {
+            // If we're returning due to deaggro (not hard-leashed), re-aggro immediately when the player
+            // comes back into range.
+            if (!shouldLeash()) {
+              const aggro = enemy.getAggroRadius() || 260
+              const { dist } = getPlayerVec()
+              if (dist < aggro) {
+                fsm.transition('chase', c, now)
+                return
+              }
+            }
+
             const dx = enemy.spawnX - enemy.x
             const dy = enemy.spawnY - enemy.y
             if (Math.hypot(dx, dy) <= HOME_RADIUS) {
