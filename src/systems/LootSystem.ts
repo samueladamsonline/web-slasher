@@ -1,9 +1,10 @@
 import * as Phaser from 'phaser'
 import type { ItemId } from '../content/items'
-import { ENEMIES, type EnemyKind, type LootDrop } from '../entities/enemies'
+import { ENEMIES, type LootDrop } from '../entities/enemies'
+import { offGameEvent, onGameEvent, GAME_EVENTS, type GameEventMap } from '../game/events'
 import type { PickupSystem } from './PickupSystem'
 
-type EnemyDiedEvent = { kind: EnemyKind; x: number; y: number }
+type EnemyDiedEvent = GameEventMap[typeof GAME_EVENTS.ENEMY_DIED]
 
 function clampChance(ch: number) {
   if (!Number.isFinite(ch)) return 0
@@ -24,11 +25,11 @@ export class LootSystem {
     this.scene = scene
     this.pickups = pickups
 
-    this.scene.events.on('enemy:died', this.onEnemyDied, this)
+    onGameEvent(this.scene.events, GAME_EVENTS.ENEMY_DIED, this.onEnemyDied, this)
   }
 
   destroy() {
-    this.scene.events.off('enemy:died', this.onEnemyDied, this)
+    offGameEvent(this.scene.events, GAME_EVENTS.ENEMY_DIED, this.onEnemyDied, this)
   }
 
   private onEnemyDied(ev: EnemyDiedEvent) {
@@ -55,4 +56,3 @@ export class LootSystem {
     this.pickups.spawnDrop(x + ox, y + oy, itemId, amount)
   }
 }
-

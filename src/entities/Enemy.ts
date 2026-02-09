@@ -2,6 +2,7 @@ import * as Phaser from 'phaser'
 import type { EnemyDef, EnemyKind } from './enemies'
 import { ENEMIES } from './enemies'
 import { DEPTH_ENEMY } from '../game/constants'
+import { emitGameEvent, GAME_EVENTS } from '../game/events'
 import { getTiledNumber, getTiledProp, type TiledProps } from '../game/tiled'
 
 type EnemyStats = Pick<
@@ -100,7 +101,7 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     this.applyKnockback(sourceX, sourceY, this.stats.knockback)
 
     // Allow AI and other systems to react (hit-stun, sound, etc.).
-    this.scene.events.emit('enemy:damaged', { enemy: this, now })
+    emitGameEvent(this.scene.events, GAME_EVENTS.ENEMY_DAMAGED, { enemy: this, now })
 
     if (this.hp <= 0) {
       this.die()
@@ -127,7 +128,7 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
 
   private die() {
     // Let other systems (loot, quests, etc.) react before this enemy is destroyed.
-    this.scene.events.emit('enemy:died', { kind: this.kind, x: this.x, y: this.y })
+    emitGameEvent(this.scene.events, GAME_EVENTS.ENEMY_DIED, { kind: this.kind, x: this.x, y: this.y })
 
     const body = this.body as Phaser.Physics.Arcade.Body | undefined
     if (body) body.enable = false

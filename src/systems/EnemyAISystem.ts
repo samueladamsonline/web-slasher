@@ -1,6 +1,7 @@
 import * as Phaser from 'phaser'
 import { Enemy } from '../entities/Enemy'
 import { StateMachine } from '../game/StateMachine'
+import { offGameEvent, onGameEvent, GAME_EVENTS, type GameEventMap } from '../game/events'
 
 type EnemyController = {
   update: (now: number, dt: number) => void
@@ -13,7 +14,7 @@ type SlimeCtx = { enemy: Enemy; seed: number; hitstunUntil: number }
 type BatState = 'hover' | 'chase' | 'retreat' | 'leash' | 'hitstun'
 type BatCtx = { enemy: Enemy; hitstunUntil: number; retreatUntil: number; retreatCooldownUntil: number }
 
-type EnemyDamagedEvent = { enemy: Enemy; now: number }
+type EnemyDamagedEvent = GameEventMap[typeof GAME_EVENTS.ENEMY_DAMAGED]
 
 export class EnemyAISystem {
   private scene: Phaser.Scene
@@ -35,11 +36,11 @@ export class EnemyAISystem {
     this.getEnemyGroup = getEnemyGroup
     this.isWorldBlocked = opts?.isWorldBlocked
 
-    this.scene.events.on('enemy:damaged', this.onEnemyDamaged)
+    onGameEvent(this.scene.events, GAME_EVENTS.ENEMY_DAMAGED, this.onEnemyDamaged)
   }
 
   destroy() {
-    this.scene.events.off('enemy:damaged', this.onEnemyDamaged)
+    offGameEvent(this.scene.events, GAME_EVENTS.ENEMY_DAMAGED, this.onEnemyDamaged)
   }
 
   update(now: number, dt: number) {
@@ -80,14 +81,8 @@ export class EnemyAISystem {
     enemy.setVelocity(0, 0)
   }
 
-  private onEnemyDamaged = (ev: unknown) => {
-    const e = ev as Partial<EnemyDamagedEvent> | null
-    if (!e) return
-    const enemy = e.enemy
-    const now = e.now
-    if (!(enemy instanceof Enemy)) return
-    if (typeof now !== 'number') return
-    this.getController(enemy).onDamaged(now)
+  private onEnemyDamaged = (ev: EnemyDamagedEvent) => {
+    this.getController(ev.enemy).onDamaged(ev.now)
   }
 
   private getController(enemy: Enemy): EnemyController {
