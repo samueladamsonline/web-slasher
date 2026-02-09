@@ -145,7 +145,7 @@ export class EnemyAISystem {
       update: (now, dt) => fsm.update(ctx, now, dt),
       onDamaged: (now) => {
         // Keep this short so wander/chase resumes quickly after knockback.
-        ctx.hitstunUntil = now + Math.max(120, Math.min(240, Math.floor(enemy.stats.invulnMs)))
+        ctx.hitstunUntil = now + Math.max(0, Math.floor(enemy.getHitstunMs()))
         fsm.transition('hitstun', ctx, now)
       },
     }
@@ -314,7 +314,7 @@ export class EnemyAISystem {
     return {
       update: (now, dt) => fsm.update(ctx, now, dt),
       onDamaged: (now) => {
-        ctx.hitstunUntil = now + Math.max(120, Math.min(240, Math.floor(enemy.stats.invulnMs)))
+        ctx.hitstunUntil = now + Math.max(0, Math.floor(enemy.getHitstunMs()))
         // Cancel retreat so the bat doesn't immediately re-enter it after hit-stun ends.
         ctx.retreatUntil = 0
         fsm.transition('hitstun', ctx, now)

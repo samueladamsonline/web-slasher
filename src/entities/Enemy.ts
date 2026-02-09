@@ -4,7 +4,10 @@ import { ENEMIES } from './enemies'
 import { DEPTH_ENEMY } from '../game/constants'
 import { getTiledNumber, getTiledProp, type TiledProps } from '../game/tiled'
 
-type EnemyStats = Pick<EnemyDef, 'invulnMs' | 'knockback' | 'moveSpeed' | 'leashRadius' | 'touchDamage' | 'touchKnockback' | 'aggroRadius'>
+type EnemyStats = Pick<
+  EnemyDef,
+  'invulnMs' | 'hitstunMs' | 'knockback' | 'moveSpeed' | 'leashRadius' | 'touchDamage' | 'touchKnockback' | 'aggroRadius'
+>
 
 export class Enemy extends Phaser.Physics.Arcade.Sprite {
   readonly kind: EnemyKind
@@ -23,6 +26,7 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     this.spawnY = y
     this.stats = {
       invulnMs: def.invulnMs,
+      hitstunMs: def.hitstunMs,
       knockback: def.knockback,
       moveSpeed: def.moveSpeed,
       leashRadius: def.leashRadius,
@@ -63,6 +67,10 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
 
   getMoveSpeed() {
     return this.stats.moveSpeed
+  }
+
+  getHitstunMs() {
+    return this.stats.hitstunMs
   }
 
   getAggroRadius() {

@@ -196,9 +196,12 @@ async function slashEnemyAndGetHpDelta(page, kind) {
   await page.evaluate(() => {
     globalThis.__dbg?.tryAttack?.()
   })
-  await page.waitForTimeout(80)
+  // Wait long enough for the strike (windup) to occur even for slower weapons.
+  await page.waitForTimeout(140)
   const atk1 = await getLastAttack(page)
-  await page.waitForTimeout(170)
+  // Wait long enough for the full weapon cooldown window to pass so subsequent tests
+  // don't accidentally enqueue an attack while still locked (greatsword total is ~390ms).
+  await page.waitForTimeout(360)
 
   const after = await getEnemies(page)
   const afterEnemy = Array.isArray(after) ? after.find((e) => e.kind === kind) : null
@@ -596,16 +599,50 @@ try {
     }
 
     const first = enemies0[0]
-    const driftPos = await pushIntoEnemyAndMeasureDrift(page, first.kind, typeof first.bx === 'number' ? first.bx : first.x, typeof first.by === 'number' ? first.by : first.y)
-    if (driftPos) {
-      const drift = Math.hypot(driftPos.x - first.x, driftPos.y - first.y)
-      if (drift > 8) errors.push(`enemy drifted too much from player collision push; drift=${drift.toFixed(2)}px`)
-    }
+	    const driftPos = await pushIntoEnemyAndMeasureDrift(page, first.kind, typeof first.bx === 'number' ? first.bx : first.x, typeof first.by === 'number' ? first.by : first.y)
+	    if (driftPos) {
+	      const drift = Math.hypot(driftPos.x - first.x, driftPos.y - first.y)
+	      if (drift > 8) errors.push(`enemy drifted too much from player collision push; drift=${drift.toFixed(2)}px`)
+	    }
 
-    // AI sanity: slime should wander even if player is far away.
-    try {
-      await teleportPlayer(page, 100, 100)
-      await waitForEnemyMove(page, 'slime', 6, 3000)
+	    // Attack lock sanity: while attacking, movement input should not move the player.
+	    try {
+	      await teleportPlayer(page, 100, 900)
+	      await page.waitForTimeout(120)
+	      await page.keyboard.down('d')
+	      await page.waitForTimeout(140)
+
+	      const p0 = await page.evaluate(() => {
+	        const p = globalThis.__dbg?.player
+	        if (!p) return null
+	        globalThis.__dbg?.tryAttack?.()
+	        return { x: p.x, y: p.y }
+	      })
+	      await page.waitForTimeout(170)
+	      const p1 = await getPlayerPos(page)
+	      if (p0 && p1) {
+	        const dx = Math.abs(p1.x - p0.x)
+	        const dy = Math.abs(p1.y - p0.y)
+	        if (dx > 9 || dy > 9) throw new Error(`expected minimal movement during attack; dx=${dx} dy=${dy}`)
+	      }
+
+	      // After recovery ends, movement should resume while the key is still held.
+	      await page.waitForTimeout(260)
+	      const p2 = await getPlayerPos(page)
+	      if (p1 && p2) {
+	        const dx = Math.abs(p2.x - p1.x)
+	        if (dx < 8) throw new Error(`expected movement to resume after attack; dx=${dx}`)
+	      }
+	    } catch (e) {
+	      errors.push(`expected attack movement lock; ${String(e?.message ?? e)}`)
+	    } finally {
+	      await page.keyboard.up('d')
+	    }
+
+	    // AI sanity: slime should wander even if player is far away.
+	    try {
+	      await teleportPlayer(page, 100, 100)
+	      await waitForEnemyMove(page, 'slime', 6, 3000)
     } catch (e) {
       errors.push(`expected slime to move (AI); ${String(e?.message ?? e)}`)
     }
@@ -647,18 +684,31 @@ try {
     // Touch damage sanity: colliding with an enemy should reduce player hp with invuln.
     if (slime) {
       try {
+        // Freeze all enemies so we don't accidentally re-trigger touch damage while waiting
+        // for invulnerability to expire.
+        await page.evaluate(() => {
+          const scene = globalThis.__dbg?.player?.scene
+          const group = scene?.mapRuntime?.enemies
+          const kids = group?.getChildren?.() ?? []
+          for (const e of kids) {
+            if (!e?.stats) continue
+            if (typeof e.__testPrevSpeed !== 'number') e.__testPrevSpeed = e.stats.moveSpeed
+            e.stats.moveSpeed = 0
+            if (typeof e.setVelocity === 'function') e.setVelocity(0, 0)
+          }
+        })
+
         const enemiesNow0 = await getEnemies(page)
         const s0 = Array.isArray(enemiesNow0) ? enemiesNow0.find((e) => e.kind === 'slime') : null
         if (!s0) throw new Error(`slime not found for touch test; enemies=${JSON.stringify(enemiesNow0)}`)
 
         // Ensure we aren't still invulnerable from earlier enemy contact tests.
-        // Important: move away from all enemies first so we don't re-trigger touch damage
-        // while waiting for invuln to expire (this was causing flakes).
-        await teleportPlayer(page, 100, 100)
+        await teleportPlayer(page, 100, 900)
         await page.waitForTimeout(80)
         const max = await getPlayerMaxHp(page)
         if (typeof max === 'number') await setPlayerHp(page, max)
-        await page.waitForTimeout(700)
+        // touchInvulnMs is currently 800ms; wait longer than that for determinism.
+        await page.waitForTimeout(1100)
 
         const hp0 = await getPlayerHp(page)
         await teleportPlayer(page, typeof s0.bx === 'number' ? s0.bx : s0.x, typeof s0.by === 'number' ? s0.by : s0.y)
@@ -678,13 +728,101 @@ try {
         if (hp2 < hp1) throw new Error(`expected invuln to prevent rapid drain; hp1=${hp1} hp2=${hp2}`)
       } catch (e) {
         errors.push(`expected touch damage + invuln; ${String(e?.message ?? e)}`)
+      } finally {
+        await page.evaluate(() => {
+          const scene = globalThis.__dbg?.player?.scene
+          const group = scene?.mapRuntime?.enemies
+          const kids = group?.getChildren?.() ?? []
+          for (const e of kids) {
+            if (!e?.stats) continue
+            const prev = e.__testPrevSpeed
+            if (typeof prev === 'number') e.stats.moveSpeed = prev
+            delete e.__testPrevSpeed
+          }
+        })
       }
     }
 
-    // Weapon stats sanity: swapping weapons should change damage output.
-    try {
-      await equipWeapon(page, 'sword')
-      const { hp0, hp1, before, after } = await slashEnemyAndGetHpDelta(page, 'slime')
+		    // Attack timing sanity: strikes should not apply damage immediately (windup), then should apply damage.
+		    if (slime) {
+		      try {
+		        await equipWeapon(page, 'sword')
+	        const nowEnemies = await getEnemies(page)
+	        const s0 = Array.isArray(nowEnemies) ? nowEnemies.find((e) => e.kind === 'slime') : null
+	        if (!s0) throw new Error(`slime missing for attack timing test; enemies=${JSON.stringify(nowEnemies)}`)
+
+	        // Freeze all enemies so collision + timing is deterministic.
+	        await page.evaluate(() => {
+	          const scene = globalThis.__dbg?.player?.scene
+	          const group = scene?.mapRuntime?.enemies
+	          const kids = group?.getChildren?.() ?? []
+	          for (const e of kids) {
+	            if (!e?.stats) continue
+	            if (typeof e.__testPrevSpeed !== 'number') e.__testPrevSpeed = e.stats.moveSpeed
+	            e.stats.moveSpeed = 0
+	            if (typeof e.setVelocity === 'function') e.setVelocity(0, 0)
+	          }
+	        })
+
+	        const tx = typeof s0.bx === 'number' ? s0.bx : s0.x
+	        const ty = typeof s0.by === 'number' ? s0.by : s0.y
+	        await teleportPlayer(page, tx - 42, ty)
+	        await page.waitForTimeout(80)
+	        await page.evaluate(() => {
+	          if (typeof globalThis.__dbg?.setFacing === 'function') globalThis.__dbg.setFacing('right')
+	        })
+	        await page.waitForTimeout(60)
+
+	        const before = await getEnemies(page)
+	        const beforeEnemy = Array.isArray(before) ? before.find((e) => e.kind === 'slime') : null
+	        const hp0 = beforeEnemy?.hp
+	        if (typeof hp0 !== 'number') throw new Error(`expected numeric slime hp; hp0=${hp0}`)
+
+	        await page.evaluate(() => globalThis.__dbg?.tryAttack?.())
+	        await page.waitForTimeout(35)
+	        const mid = await getEnemies(page)
+	        const midEnemy = Array.isArray(mid) ? mid.find((e) => e.kind === 'slime') : null
+	        if (!midEnemy) throw new Error(`slime missing mid-swing; enemies=${JSON.stringify(mid)}`)
+	        if (midEnemy.hp !== hp0) throw new Error(`expected no damage during windup; hp0=${hp0} mid=${midEnemy.hp}`)
+
+	        await page.waitForTimeout(120)
+	        const after = await getEnemies(page)
+	        const afterEnemy = Array.isArray(after) ? after.find((e) => e.kind === 'slime') : null
+	        if (!afterEnemy) throw new Error(`slime missing after swing; enemies=${JSON.stringify(after)}`)
+	        if (afterEnemy.hp !== hp0 - 1) throw new Error(`expected damage after windup; hp0=${hp0} hp1=${afterEnemy.hp}`)
+	      } catch (e) {
+	        errors.push(`expected attack timing (windup); ${String(e?.message ?? e)}`)
+		      } finally {
+		        await page.evaluate(() => {
+		          const scene = globalThis.__dbg?.player?.scene
+		          const group = scene?.mapRuntime?.enemies
+		          const kids = group?.getChildren?.() ?? []
+		          for (const e of kids) {
+		            if (!e?.stats) continue
+		            const prev = e.__testPrevSpeed
+		            if (typeof prev === 'number') e.stats.moveSpeed = prev
+		            delete e.__testPrevSpeed
+		          }
+		        })
+		      }
+		    }
+
+        // Reset enemy spawns so weapon damage assertions are deterministic (fresh HP, no invuln carry-over).
+        // Overworld fast warp loop: overworld -> cave -> overworld.
+        await teleportPlayer(page, 100, 100)
+        await page.waitForTimeout(120)
+        await page.waitForTimeout(650)
+        await teleportPlayer(page, 288, 352)
+        await page.waitForTimeout(220)
+        await waitForMapKey(page, 'cave', 3000)
+        await teleportPlayer(page, 352, 288)
+        await page.waitForTimeout(220)
+        await waitForMapKey(page, 'overworld', 3000)
+	
+		    // Weapon stats sanity: swapping weapons should change damage output.
+		    try {
+		      await equipWeapon(page, 'sword')
+	      const { hp0, hp1, before, after } = await slashEnemyAndGetHpDelta(page, 'slime')
       if (!(typeof hp0 === 'number' && typeof hp1 === 'number'))
         throw new Error(`expected numeric slime hp for sword test; before=${JSON.stringify(before)} after=${JSON.stringify(after)}`)
       if (hp1 !== hp0 - 1) throw new Error(`expected sword damage=1; before=${hp0} after=${hp1}`)
@@ -693,12 +831,38 @@ try {
     }
 
     try {
+      // Earlier sword slashes can sometimes hit/kill the bat as collateral if enemies wander too close.
+      // If the bat is missing, reload overworld enemies via a quick overworld -> cave -> overworld warp loop.
+      let enemiesStart = await getEnemies(page)
+      let hasBat = Array.isArray(enemiesStart) ? enemiesStart.some((e) => e.kind === 'bat') : false
+      if (!hasBat) {
+        await teleportPlayer(page, 100, 100)
+        await page.waitForTimeout(120)
+        await page.waitForTimeout(650)
+
+        // Overworld fast warp loop: overworld -> cave -> overworld.
+        await teleportPlayer(page, 288, 352)
+        await page.waitForTimeout(220)
+        await waitForMapKey(page, 'cave', 3000)
+        await teleportPlayer(page, 352, 288)
+        await page.waitForTimeout(220)
+        await waitForMapKey(page, 'overworld', 3000)
+
+        enemiesStart = await getEnemies(page)
+        hasBat = Array.isArray(enemiesStart) ? enemiesStart.some((e) => e.kind === 'bat') : false
+      }
+      if (!hasBat) throw new Error(`bat not found for greatsword test; enemies=${JSON.stringify(enemiesStart)}`)
+
       await equipWeapon(page, 'greatsword')
-      const { hp0, hp1, before, after } = await slashEnemyAndGetHpDelta(page, 'bat')
-      if (!(typeof hp0 === 'number')) throw new Error(`expected numeric bat hp for greatsword test; before=${JSON.stringify(before)} after=${JSON.stringify(after)}`)
+      const { hp0, hp1, before, after, atk0, atk1 } = await slashEnemyAndGetHpDelta(page, 'bat')
+      if (!(typeof hp0 === 'number'))
+        throw new Error(`expected numeric bat hp for greatsword test; before=${JSON.stringify(before)} after=${JSON.stringify(after)}`)
       if (typeof hp1 === 'number') {
         const expected = Math.max(0, hp0 - 2)
-        if (hp1 !== expected) throw new Error(`expected greatsword damage=2; before=${hp0} after=${hp1} expected=${expected}`)
+        if (hp1 !== expected)
+          throw new Error(
+            `expected greatsword damage=2; before=${hp0} after=${hp1} expected=${expected}; atk0=${JSON.stringify(atk0)} atk1=${JSON.stringify(atk1)} beforeEnemies=${JSON.stringify(before)} afterEnemies=${JSON.stringify(after)}`,
+          )
       } else {
         // If the bat was killed and removed, that's fine as long as it wasn't a higher HP enemy.
         if (hp0 > 2) throw new Error(`expected bat to survive or report hp after hit; beforeHp=${hp0} after=${JSON.stringify(after)}`)

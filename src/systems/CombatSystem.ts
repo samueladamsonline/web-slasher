@@ -114,7 +114,6 @@ export class CombatSystem {
   private scene: Phaser.Scene
   private player: Phaser.Physics.Arcade.Sprite
   private getFacing: () => Facing
-  private getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined
   private getWeapon?: () => WeaponDef | null
   private debugHitbox: boolean
 
@@ -126,7 +125,6 @@ export class CombatSystem {
     player: Phaser.Physics.Arcade.Sprite,
     opts: {
       getFacing: () => Facing
-      getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined
       getWeapon?: () => WeaponDef | null
       debugHitbox?: boolean
     },
@@ -134,7 +132,6 @@ export class CombatSystem {
     this.scene = scene
     this.player = player
     this.getFacing = opts.getFacing
-    this.getEnemyGroup = opts.getEnemyGroup
     this.getWeapon = opts.getWeapon
     this.debugHitbox = !!opts.debugHitbox
   }
@@ -143,10 +140,14 @@ export class CombatSystem {
     return this.lastAttack
   }
 
+  canAttack() {
+    if (this.attackLock) return false
+    const weapon = this.getWeapon ? this.getWeapon() : null
+    return !!weapon
+  }
+
   tryAttack() {
     if (this.attackLock) return
-    const enemies = this.getEnemyGroup()
-    if (!enemies) return
 
     const weapon = this.getWeapon ? this.getWeapon() : null
     if (!weapon) return
@@ -184,7 +185,8 @@ export class CombatSystem {
 
     if (this.lastAttack.hits > 0) this.scene.cameras.main.shake(70, 0.003)
 
-    this.scene.time.delayedCall(Math.max(0, Math.floor(weapon.cooldownMs)), () => {
+    const lockMs = Math.max(0, Math.floor((weapon.timings?.activeMs ?? 0) + (weapon.timings?.recoveryMs ?? 0)))
+    this.scene.time.delayedCall(lockMs, () => {
       this.attackLock = false
     })
   }

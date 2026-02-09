@@ -5,7 +5,8 @@ import { StateMachine } from '../game/StateMachine'
 
 export type HeroState = 'idle' | 'walk' | 'attack' | 'hurt'
 export type HeroIntent = { vx: number; vy: number; attackPressed: boolean }
-export type HeroUpdateResult = { didStartAttack: boolean }
+export type HeroAttackTiming = { windupMs: number; activeMs: number; recoveryMs: number }
+export type HeroUpdateResult = { didStartAttack: boolean; didStrike: boolean }
 
 export class Hero extends Phaser.Physics.Arcade.Sprite {
   private readonly fsm: StateMachine<HeroState, Hero>
@@ -14,8 +15,11 @@ export class Hero extends Phaser.Physics.Arcade.Sprite {
 
   private intent: HeroIntent = { vx: 0, vy: 0, attackPressed: false }
   private moveSpeed = 0
-  private attackMs = 160
+  private attackTiming: HeroAttackTiming = { windupMs: 70, activeMs: 70, recoveryMs: 120 }
   private didStartAttack = false
+  private didStrike = false
+  private attackStrikeAt = 0
+  private attackStruck = false
   private attackUntil = 0
 
   private hurtVx = 0
@@ -97,13 +101,22 @@ export class Hero extends Phaser.Physics.Arcade.Sprite {
         attack: {
           onEnter: (h, _prev, now) => {
             h.didStartAttack = true
-            h.attackUntil = now + Math.max(0, Math.floor(h.attackMs))
+            h.attackStruck = false
+            h.attackStrikeAt = now + Math.max(0, Math.floor(h.attackTiming.windupMs))
+            h.attackUntil =
+              h.attackStrikeAt +
+              Math.max(0, Math.floor(h.attackTiming.activeMs)) +
+              Math.max(0, Math.floor(h.attackTiming.recoveryMs))
             h.setVelocity(0, 0)
             h.anims.stop()
             h.setFrame(Hero.frameFor(h.facing, 0))
           },
           onUpdate: (h, now) => {
             h.setVelocity(0, 0)
+            if (!h.attackStruck && now >= h.attackStrikeAt) {
+              h.attackStruck = true
+              h.didStrike = true
+            }
             if (now < h.attackUntil) return
             if (h.intent.vx !== 0 || h.intent.vy !== 0) h.fsm.transition('walk', h, now)
             else h.fsm.transition('idle', h, now)
@@ -146,13 +159,14 @@ export class Hero extends Phaser.Physics.Arcade.Sprite {
     this.setFrame(Hero.frameFor(this.facing, 0))
   }
 
-  updateFsm(now: number, dt: number, intent: HeroIntent, opts: { moveSpeed: number; attackMs?: number }): HeroUpdateResult {
+  updateFsm(now: number, dt: number, intent: HeroIntent, opts: { moveSpeed: number; attackTiming?: HeroAttackTiming }): HeroUpdateResult {
     this.intent = intent
     this.moveSpeed = opts.moveSpeed
-    if (typeof opts.attackMs === 'number') this.attackMs = opts.attackMs
     this.didStartAttack = false
+    this.didStrike = false
+    if (opts.attackTiming) this.attackTiming = opts.attackTiming
     this.fsm.update(this, now, dt)
-    return { didStartAttack: this.didStartAttack }
+    return { didStartAttack: this.didStartAttack, didStrike: this.didStrike }
   }
 
   hurt(now: number, knockback: { vx: number; vy: number }, opts?: { lockMs?: number; stopMs?: number }) {

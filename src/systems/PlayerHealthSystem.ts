@@ -1,7 +1,6 @@
 import * as Phaser from 'phaser'
 import { Enemy } from '../entities/Enemy'
 import { Hero } from '../entities/Hero'
-import { TILE_SIZE } from '../game/constants'
 import { HeartsUI } from '../ui/HeartsUI'
 
 export class PlayerHealthSystem {
@@ -76,38 +75,8 @@ export class PlayerHealthSystem {
   }
 
   update() {
-    const group = this.getEnemyGroup()
-    if (!group) return
-
-    const now = this.scene.time.now
-    if (now < this.invulnUntil) return
-
-    const pTile = this.tileFor(this.player)
-    if (!pTile) return
-
-    // Tile-based contact damage: if an enemy's body center enters the same tile
-    // as the player, apply touch damage immediately (then invuln kicks in).
-    let best: Enemy | null = null
-    let bestDist = Number.POSITIVE_INFINITY
-
-    const kids = group.getChildren() as unknown as Phaser.GameObjects.GameObject[]
-    for (const go of kids) {
-      if (!(go instanceof Enemy)) continue
-      if (!go.active) continue
-      const eTile = this.tileFor(go)
-      if (!eTile) continue
-      if (eTile.tx !== pTile.tx || eTile.ty !== pTile.ty) continue
-
-      const dx = go.x - this.player.x
-      const dy = go.y - this.player.y
-      const d = dx * dx + dy * dy
-      if (d < bestDist) {
-        bestDist = d
-        best = go
-      }
-    }
-
-    if (best) this.tryTouchDamage(best)
+    // Touch damage is driven by the physics overlap callback set up in onMapChanged().
+    // Keeping this update hook in case we add non-overlap health effects later.
   }
 
   private tryTouchDamage(enemy: Enemy) {
@@ -140,10 +109,5 @@ export class PlayerHealthSystem {
     this.player.hurt(now, { vx: v.x, vy: v.y })
   }
 
-  private tileFor(go: Phaser.GameObjects.GameObject) {
-    const x = (go as any).x
-    const y = (go as any).y
-    if (!(typeof x === 'number' && typeof y === 'number')) return null
-    return { tx: Math.floor(x / TILE_SIZE), ty: Math.floor(y / TILE_SIZE) }
-  }
+  // (no tile-based helpers needed)
 }

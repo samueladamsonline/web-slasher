@@ -20,6 +20,8 @@ export type EnemyDef = {
   texture: string
   hp: number
   invulnMs: number
+  // Short AI lock after taking damage (separate from invuln so tuning is easier).
+  hitstunMs: number
   knockback: number
   moveSpeed: number
   // Max distance (px) the enemy may roam from its spawn point before returning home.
@@ -38,6 +40,7 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
     texture: 'slime',
     hp: 3,
     invulnMs: 250,
+    hitstunMs: 160,
     knockback: 220,
     moveSpeed: 55,
     leashRadius: 140,
@@ -55,6 +58,7 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
     texture: 'bat',
     hp: 2,
     invulnMs: 180,
+    hitstunMs: 140,
     knockback: 280,
     moveSpeed: 135,
     leashRadius: 220,

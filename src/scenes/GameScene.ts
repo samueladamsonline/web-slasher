@@ -23,6 +23,7 @@ export class GameScene extends Phaser.Scene {
   private controls!: InputSystem
   private hero!: Hero
   private speed = 240
+  private debugAttackQueued = false
 
   private mapRuntime!: MapRuntime
   private combat!: CombatSystem
@@ -111,7 +112,6 @@ export class GameScene extends Phaser.Scene {
     const debugHitbox = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('debugHitbox')
     this.combat = new CombatSystem(this, this.hero, {
       getFacing: () => this.hero.getFacing(),
-      getEnemyGroup: () => this.mapRuntime.enemies,
       getWeapon: () => this.inventory.getWeaponDef(),
       debugHitbox,
     })
@@ -215,9 +215,11 @@ export class GameScene extends Phaser.Scene {
 
     const { vx, vy } = this.controls.getMoveAxes()
     const weapon = this.inventory.getWeaponDef()
-    const attackMs = weapon ? Math.max(120, Math.min(240, Math.floor(weapon.cooldownMs * 0.65))) : 160
-    const res = this.hero.updateFsm(this.time.now, delta, { vx, vy, attackPressed: this.controls.justPressed('attack') }, { moveSpeed: this.speed, attackMs })
-    if (res.didStartAttack) this.combat.tryAttack()
+    const attackPressedRaw = this.controls.justPressed('attack') || this.debugAttackQueued
+    this.debugAttackQueued = false
+    const attackPressed = !!weapon && attackPressedRaw && this.combat.canAttack()
+    const res = this.hero.updateFsm(this.time.now, delta, { vx, vy, attackPressed }, { moveSpeed: this.speed, attackTiming: weapon?.timings })
+    if (res.didStrike) this.combat.tryAttack()
 
     this.health.update()
     this.pickups.update()
@@ -263,7 +265,9 @@ export class GameScene extends Phaser.Scene {
       saveNow: () => this.save?.saveNow?.() ?? false,
       clearSave: () => this.save?.clear?.(),
       getLastAttack: () => this.combat?.getDebug?.() ?? { at: 0, hits: 0 },
-      tryAttack: () => this.combat?.tryAttack?.(),
+      tryAttack: () => {
+        this.debugAttackQueued = true
+      },
       tryInteract: () => this.interactions?.tryInteract?.(),
       equipWeapon: (id: string) => {
         if (id === 'sword' || id === 'greatsword') return this.inventory?.equipWeapon?.(id)
