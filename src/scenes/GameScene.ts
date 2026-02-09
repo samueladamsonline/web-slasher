@@ -25,7 +25,6 @@ export class GameScene extends Phaser.Scene {
   private hero!: Hero
   private speed = 240
   private debugAttackQueued = false
-  private tilesetMode: 'default' | 'cute' = 'default'
 
   private mapRuntime!: MapRuntime
   private combat!: CombatSystem
@@ -63,19 +62,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   preload() {
-    // Optional local override for tileset art: http://localhost:5173/?tiles=cute
-    // We don't ship these assets in git because some packs forbid redistribution.
-    this.tilesetMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('tiles') === 'cute' ? 'cute' : 'default'
-
     Hero.preload(this)
     this.load.spritesheet('slime', '/sprites/slime.png', { frameWidth: 44, frameHeight: 34 })
     this.load.spritesheet('bat', '/sprites/bat.png', { frameWidth: 64, frameHeight: 48 })
     this.load.image('overworldTiles', '/tilesets/overworld.png')
-    if (this.tilesetMode === 'cute') {
-      this.load.image('cute-tile-grass', '/tilesets/cute_fantasy/grass.png')
-      this.load.image('cute-tile-path', '/tilesets/cute_fantasy/path.png')
-      this.load.image('cute-tile-block', '/tilesets/cute_fantasy/water.png')
-    }
     this.load.tilemapTiledJSON('overworld', '/maps/overworld.json')
     this.load.tilemapTiledJSON('cave', '/maps/cave.json')
 
@@ -93,7 +83,6 @@ export class GameScene extends Phaser.Scene {
 
     this.cameras.main.startFollow(this.hero, true, 0.12, 0.12)
     this.createEnemyAnims()
-    this.installTilesetOverrides()
 
     this.mapNameUI = new MapNameUI(this)
     this.overlay = new OverlayUI(this)
@@ -270,28 +259,6 @@ export class GameScene extends Phaser.Scene {
         repeat: -1,
       })
     }
-  }
-
-  private installTilesetOverrides() {
-    if (this.tilesetMode !== 'cute') return
-    const required = ['cute-tile-grass', 'cute-tile-path', 'cute-tile-block']
-    if (!required.every((k) => this.textures.exists(k))) return
-
-    // Override the default tileset texture by drawing a 3x1 tilesheet at runtime.
-    // This keeps the Tiled map JSON stable (it still expects a 3-tile, 16x16 atlas).
-    if (this.textures.exists('overworldTiles')) this.textures.remove('overworldTiles')
-    const tex = this.textures.createCanvas('overworldTiles', 48, 16)
-    if (!tex) return
-    const ctx = tex.context
-    ctx.clearRect(0, 0, 48, 16)
-
-    const grass = this.textures.get('cute-tile-grass').getSourceImage() as HTMLImageElement
-    const path = this.textures.get('cute-tile-path').getSourceImage() as HTMLImageElement
-    const block = this.textures.get('cute-tile-block').getSourceImage() as HTMLImageElement
-    ctx.drawImage(grass, 0, 0)
-    ctx.drawImage(path, 16, 0)
-    ctx.drawImage(block, 32, 0)
-    tex.refresh()
   }
 
   private refreshDbg() {
