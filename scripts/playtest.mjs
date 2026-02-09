@@ -1154,39 +1154,57 @@ try {
 	      if (drift > 8) errors.push(`enemy drifted too much from player collision push; drift=${drift.toFixed(2)}px`)
 	    }
 
-	    // Attack lock sanity: while attacking, movement input should not move the player.
-	    try {
-	      await teleportPlayer(page, 100, 900)
-	      await page.waitForTimeout(120)
-	      await page.keyboard.down('d')
-	      await page.waitForTimeout(140)
+		    // Attack + movement sanity: if the player is moving when they attack, they should keep moving.
+		    try {
+		      const open = await findOpenTileSample(page, 3)
+		      if (!open) throw new Error('could not find open tiles for attack-move test')
 
-	      const p0 = await page.evaluate(() => {
-	        const p = globalThis.__dbg?.player
-	        if (!p) return null
-	        globalThis.__dbg?.tryAttack?.()
-	        return { x: p.x, y: p.y }
-	      })
-	      await page.waitForTimeout(170)
-	      const p1 = await getPlayerPos(page)
-	      if (p0 && p1) {
-	        const dx = Math.abs(p1.x - p0.x)
-	        const dy = Math.abs(p1.y - p0.y)
-	        if (dx > 9 || dy > 9) throw new Error(`expected minimal movement during attack; dx=${dx} dy=${dy}`)
-	      }
+		      await teleportPlayer(page, open.x, open.y)
+		      await page.waitForTimeout(120)
 
-	      // After recovery ends, movement should resume while the key is still held.
-	      await page.waitForTimeout(260)
-	      const p2 = await getPlayerPos(page)
-	      if (p1 && p2) {
-	        const dx = Math.abs(p2.x - p1.x)
-	        if (dx < 8) throw new Error(`expected movement to resume after attack; dx=${dx}`)
-	      }
-	    } catch (e) {
-	      errors.push(`expected attack movement lock; ${String(e?.message ?? e)}`)
-	    } finally {
-	      await page.keyboard.up('d')
-	    }
+		      await page.keyboard.down('d')
+		      try {
+		        await page.waitForTimeout(220)
+		        const p0 = await getPlayerPos(page)
+		        if (!p0) throw new Error('could not read player pos before attack')
+
+		        const atk0 = await getLastAttack(page)
+		        const prevAt = typeof atk0?.at === 'number' ? atk0.at : 0
+
+		        await page.evaluate(() => globalThis.__dbg?.tryAttack?.())
+
+		        let strikeAt = null
+		        const started = Date.now()
+		        while (Date.now() - started < 900) {
+		          const atk = await getLastAttack(page)
+		          const at = typeof atk?.at === 'number' ? atk.at : null
+		          if (typeof at === 'number' && at > prevAt) {
+		            strikeAt = at
+		            break
+		          }
+		          await page.waitForTimeout(20)
+		        }
+		        if (typeof strikeAt !== 'number') throw new Error('timed out waiting for strike')
+
+		        const p1 = await getPlayerPos(page)
+		        if (!p1) throw new Error('could not read player pos after strike')
+
+		        const dx1 = p1.x - p0.x
+		        if (!(dx1 > 8)) throw new Error(`expected movement to continue during attack; dx=${dx1}`)
+
+		        // Continue holding movement while the attack lock window elapses; the player should keep moving.
+		        await page.waitForTimeout(260)
+		        const p2 = await getPlayerPos(page)
+		        if (p2) {
+		          const dx2 = p2.x - p1.x
+		          if (!(dx2 > 8)) throw new Error(`expected movement to continue after strike; dx=${dx2}`)
+		        }
+		      } finally {
+		        await page.keyboard.up('d')
+		      }
+		    } catch (e) {
+		      errors.push(`expected attack to not stop movement while moving; ${String(e?.message ?? e)}`)
+		    }
 
     // AI sanity: slime should wander even if player is far away.
 	    try {

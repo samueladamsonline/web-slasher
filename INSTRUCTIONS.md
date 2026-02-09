@@ -21,6 +21,7 @@ Web-Slasher is a Phaser-based 2D top-down action RPG. The game is organized arou
 - `SaveSystem`: persistence of inventory/world/checkpoint.
 - `SoundSystem`: listens to game events and plays SFX (attack swing, hits, pickups, UI open/close).
 - `MapRuntime`: tilemap collision, warps, LOS checks, and pathfinding.
+- `Hero` (`src/entities/Hero.ts`): movement/attack/hurt finite state machine. Attacks do not hard-lock movement; if movement input is held, the hero keeps moving while the attack timing still runs.
 
 ## Player Stats
 Player power is derived from equipment via `InventorySystem.getPlayerStats()`:

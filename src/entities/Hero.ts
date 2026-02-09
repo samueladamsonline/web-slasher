@@ -107,12 +107,21 @@ export class Hero extends Phaser.Physics.Arcade.Sprite {
               h.attackStrikeAt +
               Math.max(0, Math.floor(h.attackTiming.activeMs)) +
               Math.max(0, Math.floor(h.attackTiming.recoveryMs))
-            h.setVelocity(0, 0)
-            h.anims.stop()
-            h.setFrame(Hero.frameFor(h.facing, 0))
+            // If the player started an attack while moving, keep their movement. Otherwise, lock in place.
+            if (h.intent.vx === 0 && h.intent.vy === 0) {
+              h.setVelocity(0, 0)
+              h.anims.stop()
+              h.setFrame(Hero.frameFor(h.facing, 0))
+            }
           },
           onUpdate: (h, now) => {
-            h.setVelocity(0, 0)
+            if (h.intent.vx !== 0 || h.intent.vy !== 0) {
+              h.applyMovement(h.intent.vx, h.intent.vy, h.moveSpeed)
+            } else {
+              h.setVelocity(0, 0)
+              h.anims.stop()
+              h.setFrame(Hero.frameFor(h.facing, 0))
+            }
             if (!h.attackStruck && now >= h.attackStrikeAt) {
               h.attackStruck = true
               h.didStrike = true
