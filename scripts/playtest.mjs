@@ -681,6 +681,12 @@ try {
       throw new Error(`expected stash bag size=25 (5x5); inv0.bag.length=${Array.isArray(inv0.bag) ? inv0.bag.length : 'not-array'}`)
     const hasLongSword = inv0.bag.some((s) => s?.id === 'greatsword')
     if (!hasLongSword) throw new Error(`expected starter bag to include greatsword; bag=${JSON.stringify(inv0.bag)}`)
+    const hasSwiftBoots = inv0.bag.some((s) => s?.id === 'boots_swift')
+    if (!hasSwiftBoots) throw new Error(`expected starter bag to include boots_swift; bag=${JSON.stringify(inv0.bag)}`)
+    const hasQuickGloves = inv0.bag.some((s) => s?.id === 'gloves_quick')
+    if (!hasQuickGloves) throw new Error(`expected starter bag to include gloves_quick; bag=${JSON.stringify(inv0.bag)}`)
+    const hasHeartyChest = inv0.bag.some((s) => s?.id === 'chest_hearty')
+    if (!hasHeartyChest) throw new Error(`expected starter bag to include chest_hearty; bag=${JSON.stringify(inv0.bag)}`)
 
     // 2H weapon rule: equipping greatsword should unequip shield, and shield should not be equippable while 2H is active.
     await equipWeapon(page, 'greatsword')
@@ -710,6 +716,179 @@ try {
     const invShielded = await getInventory(page)
     if (invShielded?.equipment?.shield !== 'shield_basic')
       throw new Error(`expected shield equipped after move; got ${String(invShielded?.equipment?.shield)} inv=${JSON.stringify(invShielded)}`)
+
+    // Player stats sanity: boots/gloves/chest should modify movement speed, attack speed, and max HP.
+    try {
+      const invS = await getInventory(page)
+      if (!invS?.equipment || !Array.isArray(invS?.bag)) throw new Error(`missing inventory state for stats test; inv=${JSON.stringify(invS)}`)
+
+      const idxBoots = invS.bag.findIndex((s) => s?.id === 'boots_swift')
+      const idxGloves = invS.bag.findIndex((s) => s?.id === 'gloves_quick')
+      const idxChest = invS.bag.findIndex((s) => s?.id === 'chest_hearty')
+      if (idxBoots < 0 || idxGloves < 0 || idxChest < 0)
+        throw new Error(`missing stat gear in stash; idxBoots=${idxBoots} idxGloves=${idxGloves} idxChest=${idxChest} bag=${JSON.stringify(invS.bag)}`)
+
+      // Max HP: chest_hearty grants +2 hearts.
+      const baseMax = await getPlayerMaxHp(page)
+      if (typeof baseMax !== 'number') throw new Error(`baseMax not numeric; baseMax=${baseMax}`)
+      await setPlayerHp(page, baseMax)
+      await page.waitForTimeout(60)
+
+      const equipChestOk = await page.evaluate(({ idxChest }) => globalThis.__dbg?.moveInvItem?.({ type: 'bag', index: idxChest }, { type: 'equip', slot: 'chest' }), {
+        idxChest,
+      })
+      if (!equipChestOk?.ok) throw new Error(`expected equipping chest_hearty to succeed; res=${JSON.stringify(equipChestOk)}`)
+      await page.waitForTimeout(80)
+
+      const maxAfter = await getPlayerMaxHp(page)
+      const hpAfter = await getPlayerHp(page)
+      if (maxAfter !== baseMax + 2) throw new Error(`expected maxHp +2 from chest_hearty; base=${baseMax} after=${maxAfter}`)
+      if (hpAfter !== baseMax + 2) throw new Error(`expected full HP to stay full after maxHp increase; hpAfter=${hpAfter} maxAfter=${maxAfter}`)
+
+      // Restore chest_basic (swap back from the same stash index).
+      const restoreChestOk = await page.evaluate(({ idxChest }) => globalThis.__dbg?.moveInvItem?.({ type: 'bag', index: idxChest }, { type: 'equip', slot: 'chest' }), {
+        idxChest,
+      })
+      if (!restoreChestOk?.ok) throw new Error(`expected restoring chest_basic to succeed; res=${JSON.stringify(restoreChestOk)}`)
+      await page.waitForTimeout(80)
+
+      const maxRestored = await getPlayerMaxHp(page)
+      if (maxRestored !== baseMax) throw new Error(`expected maxHp restored after chest swap back; base=${baseMax} restored=${maxRestored}`)
+
+      // Move speed: boots_swift should increase distance over a fixed time window.
+      await teleportPlayer(page, 100, 900)
+      await page.waitForTimeout(80)
+      await page.evaluate(() => {
+        const p = globalThis.__dbg?.player
+        if (p?.setVelocity) p.setVelocity(0, 0)
+      })
+      const p0 = await getPlayerPos(page)
+      await page.keyboard.down('d')
+      await page.waitForTimeout(1000)
+      await page.keyboard.up('d')
+      await page.waitForTimeout(80)
+      const p1 = await getPlayerPos(page)
+      if (!p0 || !p1) throw new Error(`missing player positions for move speed test; p0=${JSON.stringify(p0)} p1=${JSON.stringify(p1)}`)
+      const dxBase = p1.x - p0.x
+      if (!(dxBase > 150)) throw new Error(`expected baseline movement to be sizable; dxBase=${dxBase}`)
+
+      // Equip swift boots.
+      const equipBootsOk = await page.evaluate(({ idxBoots }) => globalThis.__dbg?.moveInvItem?.({ type: 'bag', index: idxBoots }, { type: 'equip', slot: 'boots' }), {
+        idxBoots,
+      })
+      if (!equipBootsOk?.ok) throw new Error(`expected equipping boots_swift to succeed; res=${JSON.stringify(equipBootsOk)}`)
+      await page.waitForTimeout(80)
+
+      await teleportPlayer(page, 100, 900)
+      await page.waitForTimeout(80)
+      const p2 = await getPlayerPos(page)
+      await page.keyboard.down('d')
+      await page.waitForTimeout(1000)
+      await page.keyboard.up('d')
+      await page.waitForTimeout(80)
+      const p3 = await getPlayerPos(page)
+      if (!p2 || !p3) throw new Error(`missing player positions for swift boots test; p2=${JSON.stringify(p2)} p3=${JSON.stringify(p3)}`)
+      const dxSwift = p3.x - p2.x
+      if (!(dxSwift > dxBase * 1.07)) throw new Error(`expected swift boots to increase move distance; dxBase=${dxBase} dxSwift=${dxSwift}`)
+
+      // Restore boots_basic (swap back).
+      const restoreBootsOk = await page.evaluate(({ idxBoots }) => globalThis.__dbg?.moveInvItem?.({ type: 'bag', index: idxBoots }, { type: 'equip', slot: 'boots' }), {
+        idxBoots,
+      })
+      if (!restoreBootsOk?.ok) throw new Error(`expected restoring boots_basic to succeed; res=${JSON.stringify(restoreBootsOk)}`)
+      await page.waitForTimeout(80)
+
+      // Attack speed: gloves_quick should reduce time between successive strikes.
+      await teleportPlayer(page, 140, 900)
+      await page.waitForTimeout(80)
+      await page.evaluate(() => {
+        const p = globalThis.__dbg?.player
+        if (!p) return
+        if (typeof globalThis.__dbg?.setFacing === 'function') globalThis.__dbg.setFacing('right')
+        if (typeof p.setVelocity === 'function') p.setVelocity(0, 0)
+      })
+
+      const atk0 = await getLastAttack(page)
+      const prevAt0 = typeof atk0?.at === 'number' ? atk0.at : 0
+      await page.evaluate(() => globalThis.__dbg?.tryAttack?.())
+      let t1 = null
+      const startAtkWait0 = Date.now()
+      while (Date.now() - startAtkWait0 < 2200) {
+        const a = await getLastAttack(page)
+        const at = typeof a?.at === 'number' ? a.at : null
+        if (typeof at === 'number' && at > prevAt0) {
+          t1 = at
+          break
+        }
+        await page.waitForTimeout(20)
+      }
+      if (!(typeof t1 === 'number')) throw new Error('timed out waiting for first baseline attack strike')
+
+      await page.evaluate(() => globalThis.__dbg?.tryAttack?.())
+      let t2 = null
+      const startAtkWait1 = Date.now()
+      while (Date.now() - startAtkWait1 < 2200) {
+        const a = await getLastAttack(page)
+        const at = typeof a?.at === 'number' ? a.at : null
+        if (typeof at === 'number' && at > t1) {
+          t2 = at
+          break
+        }
+        await page.waitForTimeout(20)
+      }
+      if (!(typeof t2 === 'number')) throw new Error('timed out waiting for second baseline attack strike')
+      const dtBase = t2 - t1
+      if (!(dtBase > 140)) throw new Error(`baseline attack dt too small/unexpected; dtBase=${dtBase}`)
+
+      // Equip quick gloves.
+      const equipGlovesOk = await page.evaluate(({ idxGloves }) => globalThis.__dbg?.moveInvItem?.({ type: 'bag', index: idxGloves }, { type: 'equip', slot: 'gloves' }), {
+        idxGloves,
+      })
+      if (!equipGlovesOk?.ok) throw new Error(`expected equipping gloves_quick to succeed; res=${JSON.stringify(equipGlovesOk)}`)
+      await page.waitForTimeout(80)
+
+      const atk1 = await getLastAttack(page)
+      const prevAt1 = typeof atk1?.at === 'number' ? atk1.at : 0
+      await page.evaluate(() => globalThis.__dbg?.tryAttack?.())
+      let t3 = null
+      const startAtkWait2 = Date.now()
+      while (Date.now() - startAtkWait2 < 2200) {
+        const a = await getLastAttack(page)
+        const at = typeof a?.at === 'number' ? a.at : null
+        if (typeof at === 'number' && at > prevAt1) {
+          t3 = at
+          break
+        }
+        await page.waitForTimeout(20)
+      }
+      if (!(typeof t3 === 'number')) throw new Error('timed out waiting for first quick-gloves attack strike')
+
+      await page.evaluate(() => globalThis.__dbg?.tryAttack?.())
+      let t4 = null
+      const startAtkWait3 = Date.now()
+      while (Date.now() - startAtkWait3 < 2200) {
+        const a = await getLastAttack(page)
+        const at = typeof a?.at === 'number' ? a.at : null
+        if (typeof at === 'number' && at > t3) {
+          t4 = at
+          break
+        }
+        await page.waitForTimeout(20)
+      }
+      if (!(typeof t4 === 'number')) throw new Error('timed out waiting for second quick-gloves attack strike')
+
+      const dtQuick = t4 - t3
+      if (!(dtQuick < dtBase - 25)) throw new Error(`expected gloves_quick to reduce attack dt; dtBase=${dtBase} dtQuick=${dtQuick}`)
+
+      // Restore gloves_basic (swap back).
+      const restoreGlovesOk = await page.evaluate(({ idxGloves }) => globalThis.__dbg?.moveInvItem?.({ type: 'bag', index: idxGloves }, { type: 'equip', slot: 'gloves' }), {
+        idxGloves,
+      })
+      if (!restoreGlovesOk?.ok) throw new Error(`expected restoring gloves_basic to succeed; res=${JSON.stringify(restoreGlovesOk)}`)
+      await page.waitForTimeout(80)
+    } catch (e) {
+      errors.push(`expected player stat modifiers; ${String(e?.message ?? e)}`)
+    }
 
     // Slot rules: moving chest to bag should work, but should not be placeable into the helmet slot.
     const emptyIdx = Array.isArray(invShielded?.bag) ? invShielded.bag.findIndex((s) => !s) : -1

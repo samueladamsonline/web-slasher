@@ -117,6 +117,7 @@ export class CombatSystem {
   private getFacing: () => Facing
   private getWeapon?: () => WeaponDef | null
   private getAttackDamage?: () => number
+  private getAttackSpeedMul?: () => number
   private hasLineOfSight?: (fromX: number, fromY: number, toX: number, toY: number) => boolean
   private debugHitbox: boolean
 
@@ -130,6 +131,7 @@ export class CombatSystem {
       getFacing: () => Facing
       getWeapon?: () => WeaponDef | null
       getAttackDamage?: () => number
+      getAttackSpeedMul?: () => number
       debugHitbox?: boolean
       hasLineOfSight?: (fromX: number, fromY: number, toX: number, toY: number) => boolean
     },
@@ -139,6 +141,7 @@ export class CombatSystem {
     this.getFacing = opts.getFacing
     this.getWeapon = opts.getWeapon
     this.getAttackDamage = opts.getAttackDamage
+    this.getAttackSpeedMul = opts.getAttackSpeedMul
     this.hasLineOfSight = opts.hasLineOfSight
     this.debugHitbox = !!opts.debugHitbox
   }
@@ -205,7 +208,10 @@ export class CombatSystem {
 
     if (this.lastAttack.hits > 0) this.scene.cameras.main.shake(70, 0.003)
 
-    const lockMs = Math.max(0, Math.floor((weapon.timings?.activeMs ?? 0) + (weapon.timings?.recoveryMs ?? 0)))
+    const speedMulRaw = this.getAttackSpeedMul ? this.getAttackSpeedMul() : 1
+    const speedMul = typeof speedMulRaw === 'number' && Number.isFinite(speedMulRaw) ? Math.max(0.1, speedMulRaw) : 1
+    const lockBase = Math.max(0, Math.floor((weapon.timings?.activeMs ?? 0) + (weapon.timings?.recoveryMs ?? 0)))
+    const lockMs = Math.max(0, Math.floor(lockBase / speedMul))
     this.scene.time.delayedCall(lockMs, () => {
       this.attackLock = false
     })

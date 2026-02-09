@@ -56,6 +56,18 @@ export class PlayerHealthSystem {
     return this.maxHp
   }
 
+  setMaxHp(maxHp: number) {
+    const next = Math.max(1, Math.floor(maxHp))
+    if (next === this.maxHp) return
+    const prevMax = this.maxHp
+    this.maxHp = next
+    // If the player was full before a max-HP increase (eg equipping a chest piece),
+    // keep them full after. Otherwise, preserve current HP (only clamp on decreases).
+    if (next > prevMax && this.hp === prevMax) this.hp = next
+    this.hp = Math.max(0, Math.min(this.maxHp, this.hp))
+    this.ui.set(this.maxHp, this.hp)
+  }
+
   setHp(hp: number) {
     const next = Math.max(0, Math.min(this.maxHp, Math.floor(hp)))
     this.hp = next

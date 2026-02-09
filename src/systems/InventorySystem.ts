@@ -7,6 +7,17 @@ export type EquipmentState = Record<EquipmentSlot, ItemId | null>
 
 export type SlotRef = { type: 'equip'; slot: EquipmentSlot } | { type: 'bag'; index: number }
 
+export type PlayerStats = {
+  moveSpeedPct: number
+  moveSpeedMul: number
+  attackSpeedPct: number
+  attackSpeedMul: number
+  maxHpBonus: number
+  canCastSpells: boolean
+  weapon: WeaponDef | null
+  attackDamage: number
+}
+
 // Inventory snapshot is intentionally permissive to support loading older saves.
 export type InventorySnapshot = {
   coins?: number
@@ -74,8 +85,11 @@ export class InventorySystem {
 
   constructor(opts?: { onChanged?: () => void }) {
     this.onChanged = opts?.onChanged
-    // Default loadout: give the player a 2H sword to experiment with.
+    // Default loadout: give the player some gear to experiment with.
     this.bag[0] = { id: 'greatsword', qty: 1 }
+    this.bag[1] = { id: 'boots_swift', qty: 1 }
+    this.bag[2] = { id: 'gloves_quick', qty: 1 }
+    this.bag[3] = { id: 'chest_hearty', qty: 1 }
   }
 
   setOnChanged(cb: (() => void) | undefined) {
@@ -109,6 +123,9 @@ export class InventorySystem {
 
     this.bag = Array.from({ length: BAG_SIZE }, () => null)
     this.bag[0] = { id: 'greatsword', qty: 1 }
+    this.bag[1] = { id: 'boots_swift', qty: 1 }
+    this.bag[2] = { id: 'gloves_quick', qty: 1 }
+    this.bag[3] = { id: 'chest_hearty', qty: 1 }
 
     this.onChanged?.()
   }
@@ -298,6 +315,60 @@ export class InventorySystem {
   getAttackDamage() {
     const weapon = this.getWeaponDef()
     return weapon ? weapon.damage : 0
+  }
+
+  getPlayerStats(): PlayerStats {
+    const weapon = this.getWeaponDef()
+
+    const bootsId = this.getEquipment('boots')
+    const boots = bootsId ? ITEMS[bootsId] : null
+    const moveSpeedPct =
+      boots && boots.kind === 'equipment' && boots.equip?.slot === 'boots' && typeof boots.equip.moveSpeedPct === 'number'
+        ? boots.equip.moveSpeedPct
+        : 0
+
+    const glovesId = this.getEquipment('gloves')
+    const gloves = glovesId ? ITEMS[glovesId] : null
+    const attackSpeedPct =
+      gloves &&
+      gloves.kind === 'equipment' &&
+      gloves.equip?.slot === 'gloves' &&
+      typeof gloves.equip.attackSpeedPct === 'number'
+        ? gloves.equip.attackSpeedPct
+        : 0
+
+    const chestId = this.getEquipment('chest')
+    const chest = chestId ? ITEMS[chestId] : null
+    const maxHpBonus =
+      chest && chest.kind === 'equipment' && chest.equip?.slot === 'chest' && typeof chest.equip.maxHpBonus === 'number'
+        ? Math.max(0, Math.floor(chest.equip.maxHpBonus))
+        : 0
+
+    const helmId = this.getEquipment('helmet')
+    const helm = helmId ? ITEMS[helmId] : null
+    const canCastSpells =
+      !!(
+        helm &&
+        helm.kind === 'equipment' &&
+        helm.equip?.slot === 'helmet' &&
+        (helm.equip.grantsSpellcasting === undefined || !!helm.equip.grantsSpellcasting)
+      )
+
+    const msMulRaw = 1 + (Number.isFinite(moveSpeedPct) ? moveSpeedPct / 100 : 0)
+    const asMulRaw = 1 + (Number.isFinite(attackSpeedPct) ? attackSpeedPct / 100 : 0)
+    const moveSpeedMul = Math.max(0.1, msMulRaw)
+    const attackSpeedMul = Math.max(0.1, asMulRaw)
+
+    return {
+      moveSpeedPct: Number.isFinite(moveSpeedPct) ? moveSpeedPct : 0,
+      moveSpeedMul,
+      attackSpeedPct: Number.isFinite(attackSpeedPct) ? attackSpeedPct : 0,
+      attackSpeedMul,
+      maxHpBonus,
+      canCastSpells,
+      weapon,
+      attackDamage: weapon ? weapon.damage : 0,
+    }
   }
 
   equipWeapon(wid: WeaponId) {

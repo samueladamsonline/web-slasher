@@ -22,6 +22,16 @@ Web-Slasher is a Phaser-based 2D top-down action RPG. The game is organized arou
 - `SoundSystem`: listens to game events and plays SFX (attack swing, hits, pickups, UI open/close).
 - `MapRuntime`: tilemap collision, warps, LOS checks, and pathfinding.
 
+## Player Stats
+Player power is derived from equipment via `InventorySystem.getPlayerStats()`:
+- Weapons: determine whether the player can melee attack and contribute `attackDamage`.
+- Boots: `moveSpeedPct` (multiplies base movement speed).
+- Gloves: `attackSpeedPct` (scales weapon windup/active/recovery and combat lock time).
+- Chest: `maxHpBonus` (adds flat hearts to max HP; if the player was full, stays full on increases).
+- Helmet: `grantsSpellcasting` (foundation for future spells; currently only exposed via stats).
+
+`GameScene` is the integration point: it applies `moveSpeedMul`, scaled attack timings, and max HP to the hero/combat/health systems.
+
 ## Pathfinding
 `src/game/pathfinding.ts` provides A* on the collision grid. `MapRuntime.findPath` wraps this and returns tile + world-point paths. `EnemyAISystem` uses `findPath` and `hasLineOfSight` to chase around walls rather than pushing into them.
 

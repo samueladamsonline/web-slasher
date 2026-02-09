@@ -26,6 +26,7 @@ export class GameScene extends Phaser.Scene {
   private controls!: InputSystem
   private hero!: Hero
   private speed = 240
+  private baseMaxHp = 5
   private debugAttackQueued = false
   private cleanedUp = false
 
@@ -117,6 +118,10 @@ export class GameScene extends Phaser.Scene {
     this.inventory.setOnChanged(() => {
       this.save.requestSave()
       if (this.inventoryUI?.isVisible?.()) this.inventoryUI.refresh()
+      const stats = this.inventory.getPlayerStats()
+      this.health?.setMaxHp?.(this.baseMaxHp + stats.maxHpBonus)
+      // Update visible gear immediately even while the world is paused (inventory open).
+      this.heroGear?.update(false)
     })
     this.world.setOnChanged(() => this.save.requestSave())
 
@@ -136,6 +141,7 @@ export class GameScene extends Phaser.Scene {
       getFacing: () => this.hero.getFacing(),
       getWeapon: () => this.inventory.getWeaponDef(),
       getAttackDamage: () => this.inventory.getAttackDamage(),
+      getAttackSpeedMul: () => this.inventory.getPlayerStats().attackSpeedMul,
       debugHitbox,
       hasLineOfSight: (fromX, fromY, toX, toY) => this.mapRuntime.hasLineOfSight(fromX, fromY, toX, toY),
     })
@@ -274,17 +280,31 @@ export class GameScene extends Phaser.Scene {
     if (this.paused) return
 
     const { vx, vy } = this.controls.getMoveAxes()
-    const weapon = this.inventory.getWeaponDef()
+    const stats = this.inventory.getPlayerStats()
+    const weapon = stats.weapon
     const attackJustPressed = this.controls.justPressed('attack')
     const attackPressedRaw = attackJustPressed || this.debugAttackQueued
     const attackPressed = !!weapon && attackPressedRaw && this.combat.canAttack()
-    const res = this.hero.updateFsm(this.time.now, delta, { vx, vy, attackPressed }, { moveSpeed: this.speed, attackTiming: weapon?.timings })
+    const scaledAttackTiming = weapon
+      ? {
+          windupMs: Math.max(0, Math.floor(weapon.timings.windupMs / stats.attackSpeedMul)),
+          activeMs: Math.max(0, Math.floor(weapon.timings.activeMs / stats.attackSpeedMul)),
+          recoveryMs: Math.max(0, Math.floor(weapon.timings.recoveryMs / stats.attackSpeedMul)),
+        }
+      : undefined
+    const res = this.hero.updateFsm(
+      this.time.now,
+      delta,
+      { vx, vy, attackPressed },
+      { moveSpeed: this.speed * stats.moveSpeedMul, attackTiming: scaledAttackTiming },
+    )
     this.heroGear?.update(res.didStartAttack)
     // Keep debug attacks queued until an attack actually starts, so tests don't flake on timing/locks.
     if (!weapon) this.debugAttackQueued = false
     else if (res.didStartAttack) this.debugAttackQueued = false
     if (res.didStrike) this.combat.tryAttack()
 
+    this.health.setMaxHp(this.baseMaxHp + stats.maxHpBonus)
     this.health.update()
     this.pickups.update()
     if (this.health.getHp() <= 0) {

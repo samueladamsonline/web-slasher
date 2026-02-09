@@ -60,6 +60,22 @@ export class InventoryUI {
       g.strokeRoundedRect(7, 7, 18, 20, 5)
     })
 
+    ensure('item-chest-hearty', (g) => {
+      // Same base silhouette, with a "heart" strap to read as max-HP gear.
+      g.fillStyle(0x3b2a1a, 1)
+      g.fillRoundedRect(7, 7, 18, 20, 5)
+      g.fillStyle(0x6b4c2a, 1)
+      g.fillRoundedRect(8, 8, 16, 18, 5)
+      g.fillStyle(0xff4b5c, 0.95)
+      g.fillRoundedRect(11, 11, 10, 4, 2)
+      g.fillStyle(0xffc0c7, 0.55)
+      g.fillCircle(13, 12, 1.8)
+      g.lineStyle(3, 0x0a0d12, 0.55)
+      g.strokeRoundedRect(7, 7, 18, 20, 5)
+      g.lineStyle(2, 0x0a0d12, 0.35)
+      g.strokeRoundedRect(11, 11, 10, 4, 2)
+    })
+
     ensure('item-gloves', (g) => {
       g.fillStyle(0x6b4c2a, 1)
       g.fillRoundedRect(7, 14, 8, 10, 4)
@@ -72,6 +88,22 @@ export class InventoryUI {
       g.strokeRoundedRect(17, 14, 8, 10, 4)
     })
 
+    ensure('item-gloves-quick', (g) => {
+      // Slightly brighter gloves with a small "speed" stripe.
+      g.fillStyle(0x6b4c2a, 1)
+      g.fillRoundedRect(7, 14, 8, 10, 4)
+      g.fillRoundedRect(17, 14, 8, 10, 4)
+      g.fillStyle(0x3b2a1a, 1)
+      g.fillRoundedRect(8, 17, 6, 5, 3)
+      g.fillRoundedRect(18, 17, 6, 5, 3)
+      g.fillStyle(0xffd96b, 0.9)
+      g.fillRoundedRect(9, 15, 4, 2, 1)
+      g.fillRoundedRect(19, 15, 4, 2, 1)
+      g.lineStyle(3, 0x0a0d12, 0.55)
+      g.strokeRoundedRect(7, 14, 8, 10, 4)
+      g.strokeRoundedRect(17, 14, 8, 10, 4)
+    })
+
     ensure('item-boots', (g) => {
       g.fillStyle(0x6b4c2a, 1)
       g.fillRoundedRect(8, 11, 7, 14, 3)
@@ -79,6 +111,24 @@ export class InventoryUI {
       g.fillStyle(0x3b2a1a, 1)
       g.fillRoundedRect(7, 22, 10, 4, 2)
       g.fillRoundedRect(16, 22, 10, 4, 2)
+      g.lineStyle(3, 0x0a0d12, 0.55)
+      g.strokeRoundedRect(8, 11, 7, 14, 3)
+      g.strokeRoundedRect(17, 11, 7, 14, 3)
+      g.strokeRoundedRect(7, 22, 10, 4, 2)
+      g.strokeRoundedRect(16, 22, 10, 4, 2)
+    })
+
+    ensure('item-boots-swift', (g) => {
+      // Boots with a cool "wind" highlight.
+      g.fillStyle(0x6b4c2a, 1)
+      g.fillRoundedRect(8, 11, 7, 14, 3)
+      g.fillRoundedRect(17, 11, 7, 14, 3)
+      g.fillStyle(0x3b2a1a, 1)
+      g.fillRoundedRect(7, 22, 10, 4, 2)
+      g.fillRoundedRect(16, 22, 10, 4, 2)
+      g.fillStyle(0x76fff8, 0.55)
+      g.fillRoundedRect(9, 13, 4, 2, 1)
+      g.fillRoundedRect(18, 13, 4, 2, 1)
       g.lineStyle(3, 0x0a0d12, 0.55)
       g.strokeRoundedRect(8, 11, 7, 14, 3)
       g.strokeRoundedRect(17, 11, 7, 14, 3)
@@ -720,6 +770,20 @@ export class InventoryUI {
       } else {
         lines.push(`Slot: ${slotLabel(def.equip.slot)}`)
         lines.push(`Armor: +${def.equip.armor}`)
+
+        const ms = def.equip.moveSpeedPct
+        if (typeof ms === 'number' && Number.isFinite(ms) && ms !== 0) lines.push(`Move Speed: +${Math.floor(ms)}%`)
+
+        const as = def.equip.attackSpeedPct
+        if (typeof as === 'number' && Number.isFinite(as) && as !== 0) lines.push(`Attack Speed: +${Math.floor(as)}%`)
+
+        const hp = def.equip.maxHpBonus
+        if (typeof hp === 'number' && Number.isFinite(hp) && hp !== 0) lines.push(`Max HP: +${Math.floor(hp)} Hearts`)
+
+        if (def.equip.slot === 'helmet') {
+          const grants = def.equip.grantsSpellcasting
+          if (grants === undefined || !!grants) lines.push(`Spellcasting: Enabled`)
+        }
       }
 
       // Small affordance: show whether this is equipped.
