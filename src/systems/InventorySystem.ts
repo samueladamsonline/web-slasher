@@ -20,9 +20,9 @@ export type InventorySnapshot = {
   ownedWeapons?: WeaponId[]
 }
 
-// Diablo-2-ish backpack size (simple 1x1 items for now).
-const BAG_COLS = 15
-const BAG_ROWS = 10
+// Stash size (simple 1x1 items for now).
+const BAG_COLS = 5
+const BAG_ROWS = 5
 const BAG_SIZE = BAG_COLS * BAG_ROWS
 
 function clampInt(v: unknown, def = 0) {
@@ -169,22 +169,24 @@ export class InventorySystem {
 
     const bagRaw = snapshot?.bag
     if (Array.isArray(bagRaw)) {
-      const next: (InventoryItemStack | null)[] = Array.from({ length: BAG_SIZE }, () => null)
-      for (let i = 0; i < Math.min(bagRaw.length, BAG_SIZE); i++) {
-        const v = bagRaw[i] as any
+      // Older saves may have a bigger stash. We compact items into the new grid in a stable order
+      // (scan old slots top-left to bottom-right). Stash items do not stack; qty>1 spills into
+      // additional slots.
+      const flat: ItemId[] = []
+      for (const v of bagRaw as any[]) {
         if (!v) continue
         if (!isItemId(v.id)) continue
         const qty = Math.max(1, clampInt(v.qty, 1))
-        // Backpack items do not stack; if an old save has qty>1, spill into empty slots.
-        if (!next[i]) next[i] = { id: v.id, qty: 1 }
-        let remaining = qty - 1
-        while (remaining > 0) {
-          const empty = next.findIndex((s) => !s)
-          if (empty < 0) break
-          next[empty] = { id: v.id, qty: 1 }
-          remaining--
+        for (let k = 0; k < qty; k++) {
+          flat.push(v.id)
+          // No need to keep collecting once we're beyond what can fit.
+          if (flat.length >= BAG_SIZE * 3) break
         }
+        if (flat.length >= BAG_SIZE * 3) break
       }
+
+      const next: (InventoryItemStack | null)[] = Array.from({ length: BAG_SIZE }, () => null)
+      for (let i = 0; i < Math.min(flat.length, BAG_SIZE); i++) next[i] = { id: flat[i], qty: 1 }
       bag = next
     }
 
@@ -194,11 +196,24 @@ export class InventorySystem {
       bag = normalized.bag
     }
 
-    // Migration/starter-kit safety: ensure the player owns at least one basic shield.
-    // This keeps older saves compatible with the new equipment model.
-    if (equipment.shield !== 'shield_basic' && !bag.some((s) => s?.id === 'shield_basic')) {
+    // Migration/starter-kit safety: ensure the player owns at least one shield.
+    // This keeps older saves compatible with the equipment model.
+    const ownsShield =
+      !!equipment.shield ||
+      bag.some((s) => {
+        if (!s) return false
+        const def = ITEMS[s.id]
+        return def.kind === 'equipment' && def.equip?.slot === 'shield'
+      })
+    if (!ownsShield) {
       const empty = bag.findIndex((s) => !s)
       if (empty >= 0) bag[empty] = { id: 'shield_basic', qty: 1 }
+      else {
+        // If the bag is full, prefer equipping it (as long as a 2H weapon isn't forcing the slot empty).
+        const hands = getWeaponHands(equipment.weapon)
+        if (hands !== 2 && !equipment.shield) equipment.shield = 'shield_basic'
+        else bag[bag.length - 1] = { id: 'shield_basic', qty: 1 }
+      }
     }
 
     this.coins = coins

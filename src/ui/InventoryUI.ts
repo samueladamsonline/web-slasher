@@ -163,7 +163,7 @@ export class InventoryUI {
       .setOrigin(0, 0.5)
 
     this.bagHeader = scene.add
-      .text(0, 0, 'BACKPACK', {
+      .text(0, 0, 'STASH', {
         fontFamily: 'Georgia, serif',
         fontSize: '13px',
         color: '#e0c68a',
@@ -582,9 +582,9 @@ export class InventoryUI {
 
     this.dim.setSize(w, h)
 
-    // Big, D2-style overlay: near full screen to fit a 15x10 backpack grid.
-    const pw = Math.min(w - 24, Math.max(860, Math.floor(w * 0.96)))
-    const ph = Math.min(h - 24, Math.max(560, Math.floor(h * 0.92)))
+    // Compact, D2-style overlay. The stash is only 5x5, so keep the panel smaller on desktop.
+    const pw = Math.min(w - 24, Math.max(520, Math.min(740, Math.floor(w * 0.86))))
+    const ph = Math.min(h - 24, Math.max(420, Math.min(560, Math.floor(h * 0.86))))
     const cx = Math.floor(w / 2)
     const cy = Math.floor(h / 2)
 
