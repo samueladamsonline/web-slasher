@@ -113,7 +113,8 @@ export class HeroGear {
 
   private updateArmor(px: number, py: number, facing: Facing) {
     const scale = 0.38
-    const offsets: Record<EquipmentSlot, Record<Facing, Vec2>> = {
+    type ArmorSlot = Exclude<EquipmentSlot, 'weapon' | 'shield'>
+    const offsets: Record<ArmorSlot, Record<Facing, Vec2>> = {
       helmet: {
         up: { x: 0, y: -42 },
         down: { x: 0, y: -40 },
@@ -138,12 +139,9 @@ export class HeroGear {
         left: { x: -8, y: 12 },
         right: { x: 8, y: 12 },
       },
-      weapon: { down: { x: 0, y: 0 } },
-      shield: { down: { x: 0, y: 0 } },
     }
 
-    const apply = (slot: EquipmentSlot, sprite: Phaser.GameObjects.Image) => {
-      if (slot === 'weapon' || slot === 'shield') return
+    const apply = (slot: ArmorSlot, sprite: Phaser.GameObjects.Image) => {
       const itemId = this.inventory.getEquipment(slot)
       if (!itemId || !ITEMS[itemId]) {
         sprite.setVisible(false)

@@ -1,6 +1,7 @@
 import * as Phaser from 'phaser'
 import { Enemy } from '../entities/Enemy'
 import { DEPTH_HITBOX } from '../game/constants'
+import { emitGameEvent, GAME_EVENTS } from '../game/events'
 import type { Facing } from '../game/types'
 import type { WeaponDef, WeaponHitbox } from '../content/weapons'
 
@@ -166,6 +167,7 @@ export class CombatSystem {
 
     this.attackLock = true
     this.lastAttack = { at: this.scene.time.now, hits: 0 }
+    emitGameEvent(this.scene.events, GAME_EVENTS.PLAYER_ATTACK, { now: this.scene.time.now, weaponId: weapon.id })
 
     const facing = this.getFacing()
     const { offset, w: sizeW, h: sizeH } = this.resolveHitbox(weapon, facing)

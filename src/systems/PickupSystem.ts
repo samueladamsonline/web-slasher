@@ -2,6 +2,7 @@ import * as Phaser from 'phaser'
 import type { ItemId } from '../content/items'
 import { ITEMS } from '../content/items'
 import { DEPTH_PICKUP } from '../game/constants'
+import { emitGameEvent, GAME_EVENTS } from '../game/events'
 import type { MapKey } from '../game/types'
 import { getTiledNumber, getTiledString } from '../game/tiled'
 import type { WorldState } from '../game/WorldState'
@@ -212,6 +213,7 @@ export class PickupSystem {
     if (data.persisted && typeof data.objectId === 'number') {
       this.world.markPickupCollected(data.mapKey, data.objectId)
     }
+    emitGameEvent(this.scene.events, GAME_EVENTS.PICKUP_COLLECTED, { itemId: data.itemId, amount: data.amount })
     this.scene.tweens.killTweensOf(s)
     s.destroy()
   }

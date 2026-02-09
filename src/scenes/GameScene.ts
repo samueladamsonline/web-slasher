@@ -10,6 +10,7 @@ import { InventorySystem } from '../systems/InventorySystem'
 import { LootSystem } from '../systems/LootSystem'
 import { PickupSystem } from '../systems/PickupSystem'
 import { PlayerHealthSystem } from '../systems/PlayerHealthSystem'
+import { SoundSystem } from '../systems/SoundSystem'
 import { CombatSystem } from '../systems/CombatSystem'
 import { SaveSystem, type SaveDataV1 } from '../systems/SaveSystem'
 import { HeartsUI } from '../ui/HeartsUI'
@@ -36,6 +37,7 @@ export class GameScene extends Phaser.Scene {
   private world!: WorldState
   private inventory!: InventorySystem
   private pickups!: PickupSystem
+  private sfx!: SoundSystem
   private save!: SaveSystem
   private dialogueUI!: DialogueUI
   private promptUI!: InteractPromptUI
@@ -78,6 +80,7 @@ export class GameScene extends Phaser.Scene {
     PickupSystem.preload(this)
     InteractionSystem.preload(this)
     InventoryUI.preload(this)
+    SoundSystem.preload(this)
   }
 
   create() {
@@ -90,6 +93,7 @@ export class GameScene extends Phaser.Scene {
     this.controls = new InputSystem(this)
 
     this.hero = new Hero(this, 0, 0)
+    this.sfx = new SoundSystem(this)
 
     this.cameras.main.startFollow(this.hero, true, 0.12, 0.12)
     this.createEnemyAnims()
@@ -190,6 +194,7 @@ export class GameScene extends Phaser.Scene {
     this.pickups?.clear?.()
     this.interactions?.destroy?.()
     this.mapRuntime?.destroy?.()
+    this.sfx?.destroy?.()
 
     this.minimap?.destroy?.()
     this.inventoryUI?.destroy?.()
@@ -390,8 +395,12 @@ export class GameScene extends Phaser.Scene {
 
   private setPaused(paused: boolean, mode: 'pause' | 'inventory' | 'map' = this.pauseMode) {
     if (this.paused === paused && this.pauseMode === mode) return
+    const wasPaused = this.paused
     this.paused = paused
     this.pauseMode = mode
+
+    if (!wasPaused && this.paused) this.sfx?.playUiOpen?.()
+    if (wasPaused && !this.paused) this.sfx?.playUiClose?.()
 
     if (this.paused) {
       this.hero.setVelocity(0, 0)

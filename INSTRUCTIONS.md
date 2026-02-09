@@ -19,6 +19,7 @@ Web-Slasher is a Phaser-based 2D top-down action RPG. The game is organized arou
 - `PickupSystem` + `LootSystem`: drops and auto-pickups.
 - `InteractionSystem`: sign/chest/doors and dialogue.
 - `SaveSystem`: persistence of inventory/world/checkpoint.
+- `SoundSystem`: listens to game events and plays SFX (attack swing, hits, pickups, UI open/close).
 - `MapRuntime`: tilemap collision, warps, LOS checks, and pathfinding.
 
 ## Pathfinding
@@ -26,6 +27,9 @@ Web-Slasher is a Phaser-based 2D top-down action RPG. The game is organized arou
 
 ## Collision & Damage
 Arcade physics colliders handle walls. Touch damage is driven by overlap callbacks plus a swept-circle check in `PlayerHealthSystem` to avoid tunneling with fast/small enemies.
+
+## Events
+`src/game/events.ts` defines typed game events (enemy damaged/died, player attacks, pickups collected). Prefer emitting events from gameplay systems and reacting in dedicated systems (for example `SoundSystem`, `LootSystem`) to keep coupling low.
 
 ## Testing
 Playtests run via `npm run playtest` and should be executed after any gameplay changes. Update or add tests when behavior changes.
