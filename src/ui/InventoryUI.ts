@@ -1,5 +1,6 @@
 import * as Phaser from 'phaser'
 import { ITEMS, type EquipmentSlot, type ItemId } from '../content/items'
+import { WEAPONS } from '../content/weapons'
 import { DEPTH_UI } from '../game/constants'
 import type { InventoryItemStack, InventorySystem, SlotRef } from '../systems/InventorySystem'
 
@@ -13,6 +14,16 @@ type SlotView = {
 
 function isItemId(v: unknown): v is ItemId {
   return typeof v === 'string' && v in ITEMS
+}
+
+function slotLabel(slot: EquipmentSlot) {
+  if (slot === 'helmet') return 'Helmet'
+  if (slot === 'chest') return 'Chest'
+  if (slot === 'gloves') return 'Gloves'
+  if (slot === 'boots') return 'Boots'
+  if (slot === 'weapon') return 'Weapon'
+  if (slot === 'shield') return 'Shield'
+  return 'Equipment'
 }
 
 export class InventoryUI {
@@ -123,18 +134,24 @@ export class InventoryUI {
   private panel: Phaser.GameObjects.Rectangle
   private equipHeader: Phaser.GameObjects.Text
   private bagHeader: Phaser.GameObjects.Text
+  private detailsHeader: Phaser.GameObjects.Text
   private bagPanel: Phaser.GameObjects.Rectangle
+  private detailsPanel: Phaser.GameObjects.Rectangle
   private bagHover: Phaser.GameObjects.Rectangle
   private title: Phaser.GameObjects.Text
   private hint: Phaser.GameObjects.Text
   private coinsKeys: Phaser.GameObjects.Text
   private hoverText: Phaser.GameObjects.Text
+  private detailsIcon: Phaser.GameObjects.Image
+  private detailsTitle: Phaser.GameObjects.Text
+  private detailsBody: Phaser.GameObjects.Text
 
   private equipSlots: Record<EquipmentSlot, SlotView>
   private bagSlots: SlotView[] = []
 
   private hovered: SlotRef | null = null
   private bagGrid: { left: number; top: number; slot: number; gap: number; cols: number; rows: number } | null = null
+  private detailsRegion: { left: number; top: number; w: number; h: number } | null = null
   private dragging:
     | {
         from: SlotRef
@@ -173,8 +190,21 @@ export class InventoryUI {
       })
       .setOrigin(0, 0.5)
 
+    this.detailsHeader = scene.add
+      .text(0, 0, 'DETAILS', {
+        fontFamily: 'Georgia, serif',
+        fontSize: '13px',
+        color: '#e0c68a',
+      })
+      .setOrigin(0, 0.5)
+      .setVisible(false)
+
     this.bagPanel = scene.add.rectangle(0, 0, 10, 10, 0x0b111a, 0.68).setOrigin(0.5, 0.5)
     this.bagPanel.setStrokeStyle(2, 0xe0c68a, 0.22)
+
+    this.detailsPanel = scene.add.rectangle(0, 0, 10, 10, 0x0b111a, 0.68).setOrigin(0.5, 0.5)
+    this.detailsPanel.setStrokeStyle(2, 0xe0c68a, 0.22)
+    this.detailsPanel.setVisible(false)
 
     this.bagHover = scene.add.rectangle(0, 0, 10, 10, 0x000000, 0).setOrigin(0.5, 0.5)
     this.bagHover.setStrokeStyle(2, 0xf3e2b0, 0.38)
@@ -211,6 +241,30 @@ export class InventoryUI {
         color: '#f4f2ec',
       })
       .setOrigin(0, 0.5)
+
+    this.detailsIcon = scene.add.image(0, 0, 'item-coin').setOrigin(0.5, 0.5)
+    this.detailsIcon.setVisible(false)
+
+    this.detailsTitle = scene.add
+      .text(0, 0, '', {
+        fontFamily: 'Georgia, serif',
+        fontSize: '18px',
+        color: '#f1e6c8',
+        wordWrap: { width: 260, useAdvancedWrap: true },
+      })
+      .setOrigin(0, 0)
+      .setVisible(false)
+
+    this.detailsBody = scene.add
+      .text(0, 0, '', {
+        fontFamily: 'Georgia, serif',
+        fontSize: '13px',
+        color: '#d7d3c8',
+        wordWrap: { width: 260, useAdvancedWrap: true },
+        lineSpacing: 4,
+      })
+      .setOrigin(0, 0)
+      .setVisible(false)
 
     const makeSlot = (ref: SlotRef, style: 'equip' | 'bag', labelText?: string) => {
       const isEquip = style === 'equip'
@@ -273,6 +327,11 @@ export class InventoryUI {
       this.hoverText,
       this.hint,
       this.coinsKeys,
+      this.detailsPanel,
+      this.detailsHeader,
+      this.detailsIcon,
+      this.detailsTitle,
+      this.detailsBody,
       ...equipViews.flatMap((v) => (v.label ? [v.bg, v.label, v.icon, v.qty] : [v.bg, v.icon, v.qty])),
       ...this.bagSlots.flatMap((v) => [v.bg, v.icon, v.qty]),
     ])
@@ -610,6 +669,81 @@ export class InventoryUI {
       this.hoverText.setText('')
       this.hoverText.setVisible(false)
     }
+
+    this.updateDetailsUI(isItemId(itemId) ? itemId : null)
+  }
+
+  private updateDetailsUI(itemId: ItemId | null) {
+    const region = this.detailsRegion
+    if (!region) {
+      this.detailsPanel.setVisible(false)
+      this.detailsHeader.setVisible(false)
+      this.detailsIcon.setVisible(false)
+      this.detailsTitle.setVisible(false)
+      this.detailsBody.setVisible(false)
+      return
+    }
+
+    this.detailsPanel.setVisible(true)
+    this.detailsHeader.setVisible(true)
+
+    const pad = 14
+    const left = region.left + pad
+    const top = region.top + pad
+    const innerW = Math.max(80, region.w - pad * 2)
+
+    // Keep wrapping coherent with the live layout.
+    this.detailsTitle.setWordWrapWidth(innerW)
+    this.detailsBody.setWordWrapWidth(innerW)
+
+    if (!itemId) {
+      this.detailsIcon.setVisible(false)
+      this.detailsTitle.setText('Hover an item').setPosition(left, top).setVisible(true)
+      this.detailsBody
+        .setText('Stats and effects will appear here.\n\nDrag items between STASH and EQUIPPED to manage gear.')
+        .setPosition(left, top + 30)
+        .setVisible(true)
+      return
+    }
+
+    const def = ITEMS[itemId]
+    const lines: string[] = []
+
+    if (def.kind === 'equipment' && def.equip) {
+      if (def.equip.slot === 'weapon') {
+        const w = WEAPONS[def.equip.weaponId]
+        lines.push(`Slot: Weapon`)
+        if (w) {
+          lines.push(`Hands: ${w.hands === 2 ? 'Two-Handed' : 'One-Handed'}`)
+          lines.push(`Attack Damage: +${w.damage}`)
+        }
+      } else {
+        lines.push(`Slot: ${slotLabel(def.equip.slot)}`)
+        lines.push(`Armor: +${def.equip.armor}`)
+      }
+
+      // Small affordance: show whether this is equipped.
+      const equippedSlot = def.equip.slot
+      const equipped = this.inventory.getEquipment(equippedSlot) === def.id
+      if (equipped) lines.push('')
+      if (equipped) lines.push('Equipped')
+    } else if (def.id === 'coin') {
+      lines.push('Currency')
+    } else if (def.id === 'key') {
+      lines.push('Key Item')
+      lines.push('Opens locked doors.')
+    } else if (def.id === 'heart') {
+      lines.push('Consumable')
+      lines.push('Heals +1 HP.')
+    }
+
+    this.detailsIcon.setTexture(def.texture)
+    this.detailsIcon.setPosition(left + 18, top + 18)
+    this.detailsIcon.setScale(1.15)
+    this.detailsIcon.setVisible(true)
+
+    this.detailsTitle.setText(def.name).setPosition(left + 44, top + 2).setVisible(true)
+    this.detailsBody.setText(lines.join('\n')).setPosition(left, top + 44).setVisible(true)
   }
 
   private enableInput(enabled: boolean) {
@@ -725,6 +859,22 @@ export class InventoryUI {
     // Backpack rectangle (single panel, items laid out on an implicit grid).
     this.bagPanel.setSize(bagW, bagH)
     this.bagPanel.setPosition(bagLeft + bagW / 2, bagTop + bagH / 2)
+
+    // Tooltip/details panel to the right of the stash, if there's enough horizontal slack.
+    // (Bag sizing is often height-limited, leaving extra space on wider desktop layouts.)
+    const detailsGap = Math.max(16, Math.floor(equipSlot * 0.28))
+    const detailsLeft = Math.floor(bagLeft + bagW + detailsGap)
+    const detailsW = Math.floor(innerRight - detailsLeft)
+    const detailsH = bagH
+    const showDetails = detailsW >= 160
+    if (showDetails) {
+      this.detailsRegion = { left: detailsLeft, top: bagTop, w: detailsW, h: detailsH }
+      this.detailsHeader.setPosition(detailsLeft, bagTop - 16)
+      this.detailsPanel.setSize(detailsW, detailsH)
+      this.detailsPanel.setPosition(detailsLeft + detailsW / 2, bagTop + detailsH / 2)
+    } else {
+      this.detailsRegion = null
+    }
 
     const gridLeft = bagLeft + bagPad
     const gridTop = bagTop + bagPad
