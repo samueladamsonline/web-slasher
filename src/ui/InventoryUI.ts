@@ -8,6 +8,7 @@ type SlotView = {
   bg: Phaser.GameObjects.Rectangle
   icon: Phaser.GameObjects.Image
   qty: Phaser.GameObjects.Text
+  label?: Phaser.GameObjects.Text
 }
 
 function isItemId(v: unknown): v is ItemId {
@@ -142,6 +143,8 @@ export class InventoryUI {
         qty: Phaser.GameObjects.Text
       }
     | null = null
+  private shieldDisabled = false
+  private inputEnabled = false
 
   constructor(scene: Phaser.Scene, inventory: InventorySystem) {
     this.scene = scene
@@ -172,12 +175,6 @@ export class InventoryUI {
 
     this.bagPanel = scene.add.rectangle(0, 0, 10, 10, 0x0b111a, 0.68).setOrigin(0.5, 0.5)
     this.bagPanel.setStrokeStyle(2, 0xe0c68a, 0.22)
-    this.bagPanel.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (!this.container.visible) return
-      const idx = this.bagIndexAt(pointer.x, pointer.y)
-      if (typeof idx !== 'number') return
-      this.onSlotDown({ type: 'bag', index: idx })
-    })
 
     this.bagHover = scene.add.rectangle(0, 0, 10, 10, 0x000000, 0).setOrigin(0.5, 0.5)
     this.bagHover.setStrokeStyle(2, 0xf3e2b0, 0.38)
@@ -215,17 +212,11 @@ export class InventoryUI {
       })
       .setOrigin(0, 0.5)
 
-    const makeSlot = (ref: SlotRef, style: 'equip' | 'bag') => {
+    const makeSlot = (ref: SlotRef, style: 'equip' | 'bag', labelText?: string) => {
       const isEquip = style === 'equip'
       const bg = scene.add.rectangle(0, 0, 10, 10, 0x0b111a, isEquip ? 0.88 : 0).setOrigin(0.5, 0.5)
       if (isEquip) {
         bg.setStrokeStyle(3, 0xe0c68a, 0.28)
-        bg.setInteractive({ useHandCursor: true })
-        bg.on('pointerover', () => this.setHovered(ref))
-        bg.on('pointerout', () => {
-          if (this.isSameRef(this.hovered, ref)) this.setHovered(null)
-        })
-        bg.on('pointerdown', () => this.onSlotDown(ref))
       } else {
         // Bag cells are rendered inside one big rectangle (Diablo-2-ish).
         // These per-cell rects still exist for layout, but they are not interactive and not visible.
@@ -240,17 +231,29 @@ export class InventoryUI {
         .setOrigin(1, 1)
       qty.setVisible(false)
 
-      const view: SlotView = { ref, bg, icon, qty }
+      let label: Phaser.GameObjects.Text | undefined
+      if (isEquip && labelText) {
+        label = scene.add
+          .text(0, 0, labelText, {
+            fontFamily: 'Georgia, serif',
+            fontSize: '10px',
+            color: '#e0c68a',
+          })
+          .setOrigin(0, 0)
+          .setAlpha(0.7)
+      }
+
+      const view: SlotView = { ref, bg, icon, qty, label }
       return view
     }
 
     this.equipSlots = {
-      helmet: makeSlot({ type: 'equip', slot: 'helmet' }, 'equip'),
-      chest: makeSlot({ type: 'equip', slot: 'chest' }, 'equip'),
-      gloves: makeSlot({ type: 'equip', slot: 'gloves' }, 'equip'),
-      boots: makeSlot({ type: 'equip', slot: 'boots' }, 'equip'),
-      weapon: makeSlot({ type: 'equip', slot: 'weapon' }, 'equip'),
-      shield: makeSlot({ type: 'equip', slot: 'shield' }, 'equip'),
+      helmet: makeSlot({ type: 'equip', slot: 'helmet' }, 'equip', 'HELM'),
+      chest: makeSlot({ type: 'equip', slot: 'chest' }, 'equip', 'CHEST'),
+      gloves: makeSlot({ type: 'equip', slot: 'gloves' }, 'equip', 'GLOVES'),
+      boots: makeSlot({ type: 'equip', slot: 'boots' }, 'equip', 'BOOTS'),
+      weapon: makeSlot({ type: 'equip', slot: 'weapon' }, 'equip', 'WEAPON'),
+      shield: makeSlot({ type: 'equip', slot: 'shield' }, 'equip', 'SHIELD'),
     }
 
     for (let i = 0; i < this.inventory.getBagSize(); i++) {
@@ -270,7 +273,7 @@ export class InventoryUI {
       this.hoverText,
       this.hint,
       this.coinsKeys,
-      ...equipViews.flatMap((v) => [v.bg, v.icon, v.qty]),
+      ...equipViews.flatMap((v) => (v.label ? [v.bg, v.label, v.icon, v.qty] : [v.bg, v.icon, v.qty])),
       ...this.bagSlots.flatMap((v) => [v.bg, v.icon, v.qty]),
     ])
     this.container.setScrollFactor(0)
@@ -278,6 +281,7 @@ export class InventoryUI {
     this.container.setVisible(false)
 
     scene.scale.on('resize', this.layout, this)
+    scene.input.on('pointerdown', this.onPointerDown, this)
     scene.input.on('pointermove', this.onPointerMove, this)
     scene.input.on('pointerup', this.onPointerUp, this)
 
@@ -287,6 +291,7 @@ export class InventoryUI {
 
   destroy() {
     this.scene.scale.off('resize', this.layout, this)
+    this.scene.input.off('pointerdown', this.onPointerDown, this)
     this.scene.input.off('pointermove', this.onPointerMove, this)
     this.scene.input.off('pointerup', this.onPointerUp, this)
     this.container.destroy(true)
@@ -299,8 +304,8 @@ export class InventoryUI {
 
   show() {
     this.container.setVisible(true)
-    this.enableInput(true)
     this.layout()
+    this.enableInput(true)
     this.setHovered(null)
     this.refresh()
   }
@@ -339,6 +344,7 @@ export class InventoryUI {
     if (!stack) {
       view.icon.setVisible(false)
       view.qty.setVisible(false)
+      if (view.label) view.label.setAlpha(0.75)
       if (view.ref.type === 'equip') view.bg.setStrokeStyle(3, 0xe0c68a, 0.22)
       return
     }
@@ -346,6 +352,7 @@ export class InventoryUI {
     const def = ITEMS[stack.id]
     view.icon.setTexture(def.texture)
     view.icon.setVisible(true)
+    if (view.label) view.label.setAlpha(0.35)
 
     // Scale based on the current slot size (layout sets bg size).
     const base = 32
@@ -362,6 +369,7 @@ export class InventoryUI {
 
   private onSlotDown(ref: SlotRef) {
     if (!this.container.visible) return
+    if (!this.inputEnabled) return
     if (this.dragging) return
 
     const stack = ref.type === 'bag' ? this.inventory.getBagItem(ref.index) : (() => {
@@ -392,6 +400,15 @@ export class InventoryUI {
     this.onPointerMove(this.scene.input.activePointer)
   }
 
+  private onPointerDown(pointer: Phaser.Input.Pointer) {
+    if (!this.container.visible) return
+    if (!this.inputEnabled) return
+    if (this.dragging) return
+    const ref = this.getDropTargetAt(pointer.x, pointer.y)
+    if (!ref) return
+    this.onSlotDown(ref)
+  }
+
   private onPointerMove(pointer: Phaser.Input.Pointer) {
     const x = pointer.x
     const y = pointer.y
@@ -401,17 +418,15 @@ export class InventoryUI {
     }
 
     if (!this.container.visible) return
-    const idx = this.bagIndexAt(x, y)
-    if (typeof idx === 'number') this.setHovered({ type: 'bag', index: idx })
-    else if (this.hovered?.type === 'bag') this.setHovered(null)
+    this.setHovered(this.getDropTargetAt(x, y))
   }
 
-  private onPointerUp(_pointer: Phaser.Input.Pointer) {
+  private onPointerUp(pointer: Phaser.Input.Pointer) {
     if (!this.dragging) return
 
     const from = this.dragging.from
     const stack = this.dragging.stack
-    let to = this.hovered
+    let to = this.getDropTargetAt(pointer.x, pointer.y)
 
     this.clearDrag()
 
@@ -502,11 +517,14 @@ export class InventoryUI {
     const hands = this.inventory.getWeaponDef()?.hands ?? 1
     const disabled = hands === 2
     const v = this.equipSlots.shield
+    const wasDisabled = this.shieldDisabled
+    this.shieldDisabled = disabled
 
     if (disabled) {
       v.bg.setFillStyle(0x0b111a, 0.35)
       v.bg.setStrokeStyle(3, 0xd7d3c8, 0.12)
       v.icon.setAlpha(0.35)
+      if (v.label) v.label.setAlpha(0.25)
       v.bg.disableInteractive()
       // If the cursor was hovering this slot, clear it.
       if (this.hovered?.type === 'equip' && (this.hovered as any).slot === 'shield') this.setHovered(null)
@@ -514,8 +532,36 @@ export class InventoryUI {
       v.bg.setFillStyle(0x0b111a, 0.88)
       v.bg.setStrokeStyle(3, 0xe0c68a, 0.28)
       v.icon.setAlpha(1)
-      if (this.container.visible) v.bg.setInteractive({ useHandCursor: true })
+      if (v.label) v.label.setAlpha(this.inventory.getEquipment('shield') ? 0.35 : 0.75)
     }
+
+    if (this.container.visible && wasDisabled !== disabled) {
+      this.enableInput(true)
+    }
+  }
+
+  private getEquipRefAt(x: number, y: number): SlotRef | null {
+    for (const [slot, view] of Object.entries(this.equipSlots) as [EquipmentSlot, SlotView][]) {
+      if (slot === 'shield' && this.shieldDisabled) continue
+      const w = typeof view.bg.displayWidth === 'number' && view.bg.displayWidth > 0 ? view.bg.displayWidth : view.bg.width
+      const h = typeof view.bg.displayHeight === 'number' && view.bg.displayHeight > 0 ? view.bg.displayHeight : view.bg.height
+      const left = view.bg.x - w / 2
+      const right = view.bg.x + w / 2
+      const top = view.bg.y - h / 2
+      const bottom = view.bg.y + h / 2
+      if (x >= left && x <= right && y >= top && y <= bottom) return view.ref
+    }
+    return null
+  }
+
+  private getDropTargetAt(x: number, y: number): SlotRef | null {
+    const equipRef = this.getEquipRefAt(x, y)
+    if (equipRef) return equipRef
+
+    const idx = this.bagIndexAt(x, y)
+    if (typeof idx === 'number') return { type: 'bag', index: idx }
+
+    return null
   }
 
   private updateHoverUI() {
@@ -567,13 +613,7 @@ export class InventoryUI {
   }
 
   private enableInput(enabled: boolean) {
-    const set = (v: SlotView) => {
-      if (enabled) v.bg.setInteractive({ useHandCursor: true })
-      else v.bg.disableInteractive()
-    }
-    Object.values(this.equipSlots).forEach(set)
-    if (enabled) this.bagPanel.setInteractive({ useHandCursor: true })
-    else this.bagPanel.disableInteractive()
+    this.inputEnabled = enabled
   }
 
   private layout() {
@@ -664,6 +704,7 @@ export class InventoryUI {
       v.bg.setPosition(x, y).setSize(equipSlot, equipSlot)
       v.icon.setPosition(x, y)
       v.qty.setPosition(x + equipSlot / 2 - 6, y + equipSlot / 2 - 4)
+      if (v.label) v.label.setPosition(x - equipSlot / 2 + 6, y - equipSlot / 2 + 4)
     }
 
     const x0 = innerLeft + equipSlot / 2

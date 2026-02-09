@@ -12,7 +12,7 @@ type SlimeState = 'wander' | 'leash' | 'hitstun'
 type SlimeCtx = { enemy: Enemy; seed: number; hitstunUntil: number }
 
 type BatState = 'hover' | 'chase' | 'retreat' | 'leash' | 'hitstun'
-type BatCtx = { enemy: Enemy; hitstunUntil: number; retreatUntil: number; retreatCooldownUntil: number }
+type BatCtx = { enemy: Enemy; hitstunUntil: number; retreatUntil: number; retreatCooldownUntil: number; retreatDir: { x: number; y: number } | null }
 
 type EnemyDamagedEvent = GameEventMap[typeof GAME_EVENTS.ENEMY_DAMAGED]
 
@@ -179,7 +179,7 @@ export class EnemyAISystem {
   }
 
   private createBatController(enemy: Enemy): EnemyController {
-    const ctx: BatCtx = { enemy, hitstunUntil: 0, retreatUntil: 0, retreatCooldownUntil: 0 }
+    const ctx: BatCtx = { enemy, hitstunUntil: 0, retreatUntil: 0, retreatCooldownUntil: 0, retreatDir: null }
 
     const shouldLeash = () => {
       const leash = enemy.getLeashRadius()
@@ -210,13 +210,54 @@ export class EnemyAISystem {
       return { dx, dy, dist: dist0 }
     }
 
+    const pickRetreatDir = () => {
+      const body = enemy.body as Phaser.Physics.Arcade.Body | null
+      const cx = body?.center?.x ?? enemy.x
+      const cy = body?.center?.y ?? enemy.y
+
+      const { dx, dy, dist } = getPlayerVec()
+      // Away from the player.
+      let ax = -dx / dist
+      let ay = -dy / dist
+
+      const probe = 18
+      const can = (vx: number, vy: number) => {
+        const len = Math.hypot(vx, vy)
+        if (len < 0.0001) return false
+        const nx = vx / len
+        const ny = vy / len
+        if (!this.isWorldBlocked) return true
+        return !this.isWorldBlocked(cx + nx * probe, cy + ny * probe)
+      }
+
+      // Try the natural retreat direction first, then slide directions if blocked.
+      const candidates = [
+        { x: ax, y: ay },
+        // Rotate 90 degrees left/right to slide along walls if needed.
+        { x: ay, y: -ax },
+        { x: -ay, y: ax },
+        // Cardinal fallbacks.
+        { x: Math.sign(ax), y: 0 },
+        { x: 0, y: Math.sign(ay) },
+      ]
+
+      const chosen = candidates.find((d) => can(d.x, d.y)) ?? { x: ax, y: ay }
+      const clen = Math.hypot(chosen.x, chosen.y)
+      if (clen < 0.0001) return { x: 1, y: 0 }
+      return { x: chosen.x / clen, y: chosen.y / clen }
+    }
+
     const startRetreatIfTouching = (now: number) => {
       const { dist } = getPlayerVec()
       const touchDist = 44
       if (dist >= touchDist) return false
-      if (now < ctx.retreatCooldownUntil) return false
-      ctx.retreatUntil = now + 340
+      // If we're directly on top of the player, always allow a retreat even during cooldown
+      // so the bat doesn't get "stuck" oscillating at contact distance.
+      const superClose = dist < 14
+      if (!superClose && now < ctx.retreatCooldownUntil) return false
+      ctx.retreatUntil = now + 360
       ctx.retreatCooldownUntil = now + 650
+      ctx.retreatDir = pickRetreatDir()
       return true
     }
 
@@ -232,12 +273,13 @@ export class EnemyAISystem {
 
     const retreat = () => {
       const speed = enemy.getMoveSpeed()
-      const { dx, dy, dist } = getPlayerVec()
-      if (dist < 0.0001 || speed <= 0) {
+      const dir = ctx.retreatDir ?? pickRetreatDir()
+      if (speed <= 0) {
         enemy.setVelocity(0, 0)
         return
       }
-      enemy.setVelocity((-dx / dist) * speed * 1.1, (-dy / dist) * speed * 1.1)
+      // Slightly faster than chase so contact creates immediate space.
+      enemy.setVelocity(dir.x * speed * 1.25, dir.y * speed * 1.25)
     }
 
     const hover = (now: number) => {
@@ -344,6 +386,7 @@ export class EnemyAISystem {
         ctx.hitstunUntil = now + Math.max(0, Math.floor(enemy.getHitstunMs()))
         // Cancel retreat so the bat doesn't immediately re-enter it after hit-stun ends.
         ctx.retreatUntil = 0
+        ctx.retreatDir = null
         fsm.transition('hitstun', ctx, now)
       },
     }

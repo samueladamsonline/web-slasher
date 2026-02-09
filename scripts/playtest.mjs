@@ -557,6 +557,60 @@ try {
     })
     if (!moveChestBack?.ok) throw new Error(`expected re-equipping chest to succeed; res=${JSON.stringify(moveChestBack)}`)
 
+    // Inventory UI drag/drop sanity: unequip + re-equip chest using the actual overlay.
+    // This catches hover/targeting bugs where an item can't be re-equipped after dragging.
+    await page.keyboard.down('i')
+    await page.waitForTimeout(120)
+    await page.keyboard.up('i')
+    await page.waitForTimeout(160)
+
+    const uiPts = await page.evaluate(({ emptyIdx }) => {
+      const scene = globalThis.__dbg?.player?.scene
+      const ui = scene?.inventoryUI
+      const chest = ui?.equipSlots?.chest?.bg
+      const bag = ui?.bagSlots?.[emptyIdx]?.bg
+      const canvas = document.querySelector('canvas')
+      const rect = canvas?.getBoundingClientRect?.()
+      if (!chest || !bag || !rect) return null
+
+      // Phaser pointer coordinates are in game space (960x600), but Playwright mouse coordinates
+      // are in page space. Convert via the canvas DOM rect.
+      const sx = rect.width / 960
+      const sy = rect.height / 600
+      const toPage = (p) => ({ x: rect.left + p.x * sx, y: rect.top + p.y * sy })
+
+      return { chest: toPage({ x: chest.x, y: chest.y }), bag: toPage({ x: bag.x, y: bag.y }) }
+    }, { emptyIdx })
+    if (!uiPts) throw new Error('could not read inventory UI slot positions')
+
+    // Drag chest equip -> stash cell.
+    await page.mouse.move(uiPts.chest.x, uiPts.chest.y)
+    await page.mouse.down()
+    await page.mouse.move(uiPts.bag.x, uiPts.bag.y, { steps: 14 })
+    await page.mouse.up()
+    await page.waitForTimeout(160)
+
+    const invUi0 = await getInventory(page)
+    if (invUi0?.equipment?.chest !== null) throw new Error(`expected chest to be unequipped via UI; inv=${JSON.stringify(invUi0)}`)
+    if (invUi0?.bag?.[emptyIdx]?.id !== 'chest_basic') throw new Error(`expected chest to land in stash cell via UI; inv=${JSON.stringify(invUi0)}`)
+
+    // Drag chest stash -> chest equip.
+    await page.mouse.move(uiPts.bag.x, uiPts.bag.y)
+    await page.mouse.down()
+    await page.mouse.move(uiPts.chest.x, uiPts.chest.y, { steps: 14 })
+    await page.mouse.up()
+    await page.waitForTimeout(160)
+
+    const invUi1 = await getInventory(page)
+    if (invUi1?.equipment?.chest !== 'chest_basic') throw new Error(`expected chest to be re-equipped via UI; inv=${JSON.stringify(invUi1)}`)
+    if (invUi1?.bag?.[emptyIdx]) throw new Error(`expected stash cell to be empty after re-equip via UI; inv=${JSON.stringify(invUi1)}`)
+
+    // Close inventory overlay.
+    await page.keyboard.down('i')
+    await page.waitForTimeout(120)
+    await page.keyboard.up('i')
+    await page.waitForTimeout(120)
+
     // Locked door should not warp without a key.
     await teleportPlayer(page, 480, 352)
     await page.waitForTimeout(120)
