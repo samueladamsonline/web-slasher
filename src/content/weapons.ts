@@ -30,8 +30,6 @@ export type WeaponDef = {
   name: string
   hands: WeaponHands
   damage: number
-  // Total time between attack presses (windup + active + recovery).
-  cooldownMs: number
   hitbox: WeaponHitbox
   timings: WeaponTimings
   vfx: WeaponVfx
@@ -45,7 +43,6 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     name: 'Short Sword',
     hands: 1,
     damage: 1,
-    cooldownMs: 260,
     hitbox: { offset: 42, w: 50, h: 34 },
     timings: { windupMs: 70, activeMs: 70, recoveryMs: 120 },
     vfx: { weaponTexture: 'sword', slashTexture: 'slash', slashScale: 0.85 },
@@ -55,7 +52,6 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     name: 'Long Sword',
     hands: 2,
     damage: 2,
-    cooldownMs: 390,
     hitbox: { offset: 46, w: 66, h: 40 },
     timings: { windupMs: 95, activeMs: 90, recoveryMs: 205 },
     vfx: { weaponTexture: 'greatsword', slashTexture: 'slash-heavy', slashScale: 1.08 },
