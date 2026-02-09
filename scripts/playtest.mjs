@@ -505,7 +505,8 @@ try {
     if (inv0.equipment.chest !== 'chest_basic') throw new Error(`expected starter chest equipped; got ${String(inv0.equipment.chest)}`)
     if (inv0.equipment.gloves !== 'gloves_basic') throw new Error(`expected starter gloves equipped; got ${String(inv0.equipment.gloves)}`)
     if (inv0.equipment.boots !== 'boots_basic') throw new Error(`expected starter boots equipped; got ${String(inv0.equipment.boots)}`)
-    if (!Array.isArray(inv0.bag) || inv0.bag.length < 8) throw new Error(`expected bag array; inv0=${JSON.stringify(inv0)}`)
+    if (!Array.isArray(inv0.bag) || inv0.bag.length !== 25)
+      throw new Error(`expected stash bag size=25 (5x5); inv0.bag.length=${Array.isArray(inv0.bag) ? inv0.bag.length : 'not-array'}`)
     const hasLongSword = inv0.bag.some((s) => s?.id === 'greatsword')
     if (!hasLongSword) throw new Error(`expected starter bag to include greatsword; bag=${JSON.stringify(inv0.bag)}`)
 
