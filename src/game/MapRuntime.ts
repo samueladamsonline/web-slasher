@@ -14,6 +14,7 @@ type MapRuntimeState = {
   spawnName: string
   map: Phaser.Tilemaps.Tilemap
   ground: Phaser.Tilemaps.TilemapLayer
+  collision: Phaser.Tilemaps.TilemapLayer
   enemies: Phaser.Physics.Arcade.Group
 }
 
@@ -32,8 +33,8 @@ export class MapRuntime {
 
   private state?: MapRuntimeState
 
-  private groundCollider?: Phaser.Physics.Arcade.Collider
-  private enemyGroundCollider?: Phaser.Physics.Arcade.Collider
+  private playerCollisionCollider?: Phaser.Physics.Arcade.Collider
+  private enemyCollisionCollider?: Phaser.Physics.Arcade.Collider
 
   private warpZones: Phaser.GameObjects.Zone[] = []
   private warpIndicators: GameObj[] = []
@@ -84,10 +85,15 @@ export class MapRuntime {
   }
 
   isTileBlocked(tx: number, ty: number) {
-    const ground = this.state?.ground
-    if (!ground) return true
-    const tile = ground.getTileAt(Math.floor(tx), Math.floor(ty))
-    if (!tile) return true
+    const s = this.state
+    if (!s) return true
+    const x = Math.floor(tx)
+    const y = Math.floor(ty)
+    if (x < 0 || y < 0 || x >= s.map.width || y >= s.map.height) return true
+
+    const tile = s.collision.getTileAt(x, y)
+    // Collision layers may be sparse (empty tiles => walkable).
+    if (!tile) return false
     return !!(tile as any).collides
   }
 
@@ -184,8 +190,15 @@ export class MapRuntime {
     const ground = map.createLayer('Ground', tileset, 0, 0)
     if (!ground) throw new Error('Failed to create Ground layer. Check layer name in Tiled JSON.')
 
-    ground.setCollisionByProperty({ collides: true })
     ground.setDepth(DEPTH_GROUND)
+
+    // Use a dedicated Collision layer if present; otherwise fall back to Ground for older maps.
+    const collision = map.createLayer('Collision', tileset, 0, 0) ?? ground
+    collision.setCollisionByProperty({ collides: true })
+    if (collision !== ground) {
+      collision.setVisible(false)
+      collision.setAlpha(0)
+    }
 
     this.scene.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
     this.scene.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels)
@@ -200,14 +213,14 @@ export class MapRuntime {
     this.player.setDepth(DEPTH_PLAYER)
     this.scene.children.bringToTop(this.player)
 
-    this.groundCollider = this.scene.physics.add.collider(this.player, ground)
+    this.playerCollisionCollider = this.scene.physics.add.collider(this.player, collision)
 
     const enemies = this.scene.physics.add.group()
     const objects = this.getObjects(map, ['Enemies', 'Objects'])
     this.spawnEnemiesFromObjects(objects, enemies)
-    this.enemyGroundCollider = this.scene.physics.add.collider(enemies, ground)
+    this.enemyCollisionCollider = this.scene.physics.add.collider(enemies, collision)
 
-    this.state = { mapKey, spawnName, map, ground, enemies }
+    this.state = { mapKey, spawnName, map, ground, collision, enemies }
 
     this.installWarps(objects)
     this.pickupSystem?.install(mapKey, objects)
@@ -232,14 +245,15 @@ export class MapRuntime {
     }
     this.warpIndicators = []
 
-    this.enemyGroundCollider?.destroy()
-    this.enemyGroundCollider = undefined
+    this.enemyCollisionCollider?.destroy()
+    this.enemyCollisionCollider = undefined
     this.state?.enemies.clear(true, true)
     this.state?.enemies.destroy()
 
-    this.groundCollider?.destroy()
-    this.groundCollider = undefined
+    this.playerCollisionCollider?.destroy()
+    this.playerCollisionCollider = undefined
 
+    if (this.state?.collision && this.state.collision !== this.state.ground) this.state.collision.destroy()
     this.state?.ground.destroy()
     this.state?.map.destroy()
 
