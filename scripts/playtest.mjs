@@ -324,6 +324,46 @@ async function teleportPlayer(page, x, y) {
   )
 }
 
+async function teleportEnemy(page, kind, x, y) {
+  await page.evaluate(
+    ({ kind, x, y }) => {
+      const scene = globalThis.__dbg?.player?.scene
+      const group = scene?.mapRuntime?.enemies
+      const kids = group?.getChildren?.() ?? []
+      const e = kids.find((k) => k?.active && k?.kind === kind)
+      if (!e) return
+      const body = e.body
+      if (body && typeof body.reset === 'function') body.reset(x, y)
+      else if (typeof e.setPosition === 'function') e.setPosition(x, y)
+      if (typeof e.setVelocity === 'function') e.setVelocity(0, 0)
+    },
+    { kind, x, y },
+  )
+}
+
+async function getEnemiesInBlockedTiles(page) {
+  return await page.evaluate(() => {
+    const scene = globalThis.__dbg?.player?.scene
+    const rt = scene?.mapRuntime
+    const group = rt?.enemies
+    const kids = group?.getChildren?.() ?? []
+    const out = []
+
+    for (const e of kids) {
+      if (!e?.active) continue
+      const body = e.body
+      const cx = body?.center?.x ?? e.x
+      const cy = body?.center?.y ?? e.y
+      const tx = Math.floor(cx / 64)
+      const ty = Math.floor(cy / 64)
+      const blocked = typeof rt?.isTileBlocked === 'function' ? rt.isTileBlocked(tx, ty) : false
+      if (blocked) out.push({ kind: e?.kind ?? null, x: e.x, y: e.y, cx, cy, tx, ty })
+    }
+
+    return out
+  })
+}
+
 const server = await createServer({
   server: { host: '127.0.0.1', port: PORT, strictPort: true },
   clearScreen: false,
@@ -648,8 +688,8 @@ try {
     }
 
     // AI sanity: bat should chase when player is within aggro radius.
-    if (bat) {
-      try {
+	    if (bat) {
+	      try {
         const enemiesBefore = await getEnemies(page)
         const b0 = Array.isArray(enemiesBefore) ? enemiesBefore.find((e) => e.kind === 'bat') : null
         if (!b0) throw new Error(`bat not found; mapKey=${await getMapKey(page)}; enemiesBefore=${JSON.stringify(enemiesBefore)}`)
@@ -676,15 +716,66 @@ try {
         if (!bt1) throw new Error('bat missing after touch')
         const dist1 = Math.hypot(bt1.x - b1.x, bt1.y - b1.y)
         if (!(dist1 > dist0 + 8)) throw new Error(`expected bat to retreat after touch; dist0=${dist0} dist1=${dist1}`)
+	      } catch (e) {
+	        errors.push(`expected bat chase behavior (AI); ${String(e?.message ?? e)}`)
+	      }
+	    }
+
+    // Enemy collision sanity: enemies should never end up inside blocked tiles.
+    // Stress this by forcing the bat to chase into an internal wall for a bit.
+    if (bat) {
+      try {
+        // Internal wall tile at (12,7) is blocked in the overworld map JSON.
+        const TILE = 64
+        const wallTx = 12
+        const wallTy = 7
+        const wallLeft = wallTx * TILE
+        const wallRight = wallLeft + TILE
+        const y = wallTy * TILE + TILE / 2
+
+        await teleportPlayer(page, wallLeft - 150, y)
+        await teleportEnemy(page, 'bat', wallRight + 90, y)
+        await page.waitForTimeout(120)
+
+        // Increase bat speed slightly to amplify any collision edge cases.
+        await page.evaluate(() => {
+          const scene = globalThis.__dbg?.player?.scene
+          const group = scene?.mapRuntime?.enemies
+          const kids = group?.getChildren?.() ?? []
+          const b = kids.find((e) => e?.active && e?.kind === 'bat')
+          if (!b?.stats) return
+          if (typeof b.__testPrevSpeed !== 'number') b.__testPrevSpeed = b.stats.moveSpeed
+          b.stats.moveSpeed = Math.max(220, b.stats.moveSpeed)
+        })
+
+        const started = Date.now()
+        while (Date.now() - started < 2200) {
+          const bad = await getEnemiesInBlockedTiles(page)
+          if (Array.isArray(bad) && bad.length > 0) {
+            throw new Error(`enemies in blocked tiles: ${JSON.stringify(bad)}`)
+          }
+          await page.waitForTimeout(120)
+        }
       } catch (e) {
-        errors.push(`expected bat chase behavior (AI); ${String(e?.message ?? e)}`)
+        errors.push(`expected enemies to stay out of blocked tiles; ${String(e?.message ?? e)}`)
+      } finally {
+        await page.evaluate(() => {
+          const scene = globalThis.__dbg?.player?.scene
+          const group = scene?.mapRuntime?.enemies
+          const kids = group?.getChildren?.() ?? []
+          const b = kids.find((e) => e?.active && e?.kind === 'bat')
+          if (!b?.stats) return
+          const prev = b.__testPrevSpeed
+          if (typeof prev === 'number') b.stats.moveSpeed = prev
+          delete b.__testPrevSpeed
+        })
       }
     }
 
-    // Touch damage sanity: colliding with an enemy should reduce player hp with invuln.
-    if (slime) {
-      try {
-        // Freeze all enemies so we don't accidentally re-trigger touch damage while waiting
+	    // Touch damage sanity: colliding with an enemy should reduce player hp with invuln.
+	    if (slime) {
+	      try {
+	        // Freeze all enemies so we don't accidentally re-trigger touch damage while waiting
         // for invulnerability to expire.
         await page.evaluate(() => {
           const scene = globalThis.__dbg?.player?.scene
@@ -873,6 +964,91 @@ try {
       await equipWeapon(page, 'sword')
     }
 
+    // Wall occlusion sanity: attacks should not damage enemies through blocked tiles.
+    try {
+      // Ensure the bat exists (previous suites can legitimately kill it).
+      let enemiesStart = await getEnemies(page)
+      let hasBat = Array.isArray(enemiesStart) ? enemiesStart.some((e) => e.kind === 'bat') : false
+      if (!hasBat) {
+        // Overworld fast warp loop: overworld -> cave -> overworld.
+        await teleportPlayer(page, 100, 100)
+        await page.waitForTimeout(120)
+        await page.waitForTimeout(650)
+        await teleportPlayer(page, 288, 352)
+        await page.waitForTimeout(220)
+        await waitForMapKey(page, 'cave', 3000)
+        await teleportPlayer(page, 352, 288)
+        await page.waitForTimeout(220)
+        await waitForMapKey(page, 'overworld', 3000)
+        enemiesStart = await getEnemies(page)
+        hasBat = Array.isArray(enemiesStart) ? enemiesStart.some((e) => e.kind === 'bat') : false
+      }
+      if (!hasBat) throw new Error(`bat not found for wall occlusion test; enemies=${JSON.stringify(enemiesStart)}`)
+
+      await equipWeapon(page, 'greatsword')
+
+      // Freeze enemies so positions are deterministic.
+      await page.evaluate(() => {
+        const scene = globalThis.__dbg?.player?.scene
+        const group = scene?.mapRuntime?.enemies
+        const kids = group?.getChildren?.() ?? []
+        for (const e of kids) {
+          if (!e?.stats) continue
+          if (typeof e.__testPrevSpeed !== 'number') e.__testPrevSpeed = e.stats.moveSpeed
+          e.stats.moveSpeed = 0
+          if (typeof e.setVelocity === 'function') e.setVelocity(0, 0)
+        }
+      })
+
+      // Internal wall tile at (12,7) is blocked. Place the hero and bat on opposite sides.
+      const TILE = 64
+      const wallTx = 12
+      const wallTy = 7
+      const wallLeft = wallTx * TILE
+      const wallRight = wallLeft + TILE
+      const y = wallTy * TILE + TILE / 2
+
+      // Place player so their body is flush with the left side of the wall.
+      await teleportPlayer(page, wallLeft - 14, y)
+      await page.waitForTimeout(60)
+      await page.evaluate(() => {
+        if (typeof globalThis.__dbg?.setFacing === 'function') globalThis.__dbg.setFacing('right')
+      })
+
+      // Place bat so its body is flush with the right side of the wall.
+      await teleportEnemy(page, 'bat', wallRight + 17, y)
+      await page.waitForTimeout(80)
+
+      const before = await getEnemies(page)
+      const b0 = Array.isArray(before) ? before.find((e) => e.kind === 'bat') : null
+      const hp0 = b0?.hp
+      if (typeof hp0 !== 'number') throw new Error(`expected numeric bat hp before wall test; enemies=${JSON.stringify(before)}`)
+
+      await page.evaluate(() => globalThis.__dbg?.tryAttack?.())
+      await page.waitForTimeout(260)
+
+      const after = await getEnemies(page)
+      const b1 = Array.isArray(after) ? after.find((e) => e.kind === 'bat') : null
+      const hp1 = b1?.hp
+      if (typeof hp1 !== 'number') throw new Error(`expected numeric bat hp after wall test; enemies=${JSON.stringify(after)}`)
+      if (hp1 !== hp0) throw new Error(`expected wall to block attack; hp0=${hp0} hp1=${hp1}`)
+    } catch (e) {
+      errors.push(`expected attacks to be blocked by walls; ${String(e?.message ?? e)}`)
+    } finally {
+      await equipWeapon(page, 'sword')
+      await page.evaluate(() => {
+        const scene = globalThis.__dbg?.player?.scene
+        const group = scene?.mapRuntime?.enemies
+        const kids = group?.getChildren?.() ?? []
+        for (const e of kids) {
+          if (!e?.stats) continue
+          const prev = e.__testPrevSpeed
+          if (typeof prev === 'number') e.stats.moveSpeed = prev
+          delete e.__testPrevSpeed
+        }
+      })
+    }
+
     // Stabilize before loot check: the earlier combat suite may have caused a death.
     try {
       const st0 = await getGameState(page)
@@ -1012,6 +1188,14 @@ try {
 
   // Cave bat has touchDamage=2 override (see cave.json).
   try {
+    // Stabilize before forcing touch: ensure any invuln from overworld combat has expired,
+    // and make sure we're not accidentally overlapping an enemy while waiting.
+    await teleportPlayer(page, 288, 224)
+    await page.waitForTimeout(900)
+    const max = await getPlayerMaxHp(page)
+    if (typeof max === 'number') await setPlayerHp(page, max)
+    await page.waitForTimeout(80)
+
     const enemiesNow = await getEnemies(page)
     const bat = Array.isArray(enemiesNow) ? enemiesNow.find((e) => e.kind === 'bat') : null
     if (!bat) throw new Error('bat not found in cave for touchDamage override')

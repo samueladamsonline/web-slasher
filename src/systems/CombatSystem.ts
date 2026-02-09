@@ -115,6 +115,7 @@ export class CombatSystem {
   private player: Phaser.Physics.Arcade.Sprite
   private getFacing: () => Facing
   private getWeapon?: () => WeaponDef | null
+  private hasLineOfSight?: (fromX: number, fromY: number, toX: number, toY: number) => boolean
   private debugHitbox: boolean
 
   private attackLock = false
@@ -127,12 +128,14 @@ export class CombatSystem {
       getFacing: () => Facing
       getWeapon?: () => WeaponDef | null
       debugHitbox?: boolean
+      hasLineOfSight?: (fromX: number, fromY: number, toX: number, toY: number) => boolean
     },
   ) {
     this.scene = scene
     this.player = player
     this.getFacing = opts.getFacing
     this.getWeapon = opts.getWeapon
+    this.hasLineOfSight = opts.hasLineOfSight
     this.debugHitbox = !!opts.debugHitbox
   }
 
@@ -151,6 +154,10 @@ export class CombatSystem {
 
     const weapon = this.getWeapon ? this.getWeapon() : null
     if (!weapon) return
+
+    const pBody = this.player.body as Phaser.Physics.Arcade.Body | undefined
+    const px = pBody?.center?.x ?? this.player.x
+    const py = pBody?.center?.y ?? this.player.y
 
     this.attackLock = true
     this.lastAttack = { at: this.scene.time.now, hits: 0 }
@@ -173,6 +180,12 @@ export class CombatSystem {
       const go = (b as any)?.gameObject as Phaser.GameObjects.GameObject | undefined
       if (!go || !go.active) continue
       if (!(go instanceof Enemy)) continue
+      if (this.hasLineOfSight) {
+        const eBody = go.body as Phaser.Physics.Arcade.Body | undefined
+        const ex = eBody?.center?.x ?? go.x
+        const ey = eBody?.center?.y ?? go.y
+        if (!this.hasLineOfSight(px, py, ex, ey)) continue
+      }
       if (go.damage(this.scene.time.now, this.player.x, this.player.y, weapon.damage)) {
         this.lastAttack.hits++
         this.spawnHitSpark(go.x, go.y)

@@ -19,13 +19,21 @@ export class EnemyAISystem {
   private scene: Phaser.Scene
   private player: Phaser.Physics.Arcade.Sprite
   private getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined
+  private isWorldBlocked?: (x: number, y: number) => boolean
 
   private controllers = new WeakMap<Enemy, EnemyController>()
+  private lastSafePos = new WeakMap<Enemy, { x: number; y: number }>()
 
-  constructor(scene: Phaser.Scene, player: Phaser.Physics.Arcade.Sprite, getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined) {
+  constructor(
+    scene: Phaser.Scene,
+    player: Phaser.Physics.Arcade.Sprite,
+    getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined,
+    opts?: { isWorldBlocked?: (x: number, y: number) => boolean },
+  ) {
     this.scene = scene
     this.player = player
     this.getEnemyGroup = getEnemyGroup
+    this.isWorldBlocked = opts?.isWorldBlocked
 
     this.scene.events.on('enemy:damaged', this.onEnemyDamaged)
   }
@@ -44,8 +52,32 @@ export class EnemyAISystem {
       if (!go.active) continue
       const body = go.body as Phaser.Physics.Arcade.Body | null
       if (!body || !body.enable) continue
+      this.recordSafePos(go)
       this.getController(go).update(now, dt)
+      this.enforceNotInBlockedTile(go)
     }
+  }
+
+  private recordSafePos(enemy: Enemy) {
+    if (!this.isWorldBlocked) return
+    const body = enemy.body as Phaser.Physics.Arcade.Body | null
+    const cx = body?.center?.x ?? enemy.x
+    const cy = body?.center?.y ?? enemy.y
+    if (this.isWorldBlocked(cx, cy)) return
+    this.lastSafePos.set(enemy, { x: enemy.x, y: enemy.y })
+  }
+
+  private enforceNotInBlockedTile(enemy: Enemy) {
+    if (!this.isWorldBlocked) return
+    const body = enemy.body as Phaser.Physics.Arcade.Body | null
+    const cx = body?.center?.x ?? enemy.x
+    const cy = body?.center?.y ?? enemy.y
+    if (!this.isWorldBlocked(cx, cy)) return
+
+    const safe = this.lastSafePos.get(enemy) ?? { x: enemy.spawnX, y: enemy.spawnY }
+    if (body && typeof body.reset === 'function') body.reset(safe.x, safe.y)
+    else enemy.setPosition(safe.x, safe.y)
+    enemy.setVelocity(0, 0)
   }
 
   private onEnemyDamaged = (ev: unknown) => {

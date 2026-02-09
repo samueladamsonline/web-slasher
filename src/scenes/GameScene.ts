@@ -114,6 +114,7 @@ export class GameScene extends Phaser.Scene {
       getFacing: () => this.hero.getFacing(),
       getWeapon: () => this.inventory.getWeaponDef(),
       debugHitbox,
+      hasLineOfSight: (fromX, fromY, toX, toY) => this.mapRuntime.hasLineOfSight(fromX, fromY, toX, toY),
     })
 
     this.health = new PlayerHealthSystem(this, this.hero, () => this.mapRuntime.enemies)
@@ -131,7 +132,9 @@ export class GameScene extends Phaser.Scene {
     this.mapRuntime.setPickupSystem(this.pickups)
     this.mapRuntime.setInteractionSystem(this.interactions)
 
-    this.enemyAI = new EnemyAISystem(this, this.hero, () => this.mapRuntime.enemies)
+    this.enemyAI = new EnemyAISystem(this, this.hero, () => this.mapRuntime.enemies, {
+      isWorldBlocked: (x, y) => this.mapRuntime.isWorldBlocked(x, y),
+    })
 
     this.minimap = new MinimapUI(this, this.hero, {
       getMapKey: () => this.mapRuntime.mapKey,
@@ -215,10 +218,13 @@ export class GameScene extends Phaser.Scene {
 
     const { vx, vy } = this.controls.getMoveAxes()
     const weapon = this.inventory.getWeaponDef()
-    const attackPressedRaw = this.controls.justPressed('attack') || this.debugAttackQueued
-    this.debugAttackQueued = false
+    const attackJustPressed = this.controls.justPressed('attack')
+    const attackPressedRaw = attackJustPressed || this.debugAttackQueued
     const attackPressed = !!weapon && attackPressedRaw && this.combat.canAttack()
     const res = this.hero.updateFsm(this.time.now, delta, { vx, vy, attackPressed }, { moveSpeed: this.speed, attackTiming: weapon?.timings })
+    // Keep debug attacks queued until an attack actually starts, so tests don't flake on timing/locks.
+    if (!weapon) this.debugAttackQueued = false
+    else if (res.didStartAttack) this.debugAttackQueued = false
     if (res.didStrike) this.combat.tryAttack()
 
     this.health.update()

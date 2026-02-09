@@ -91,6 +91,50 @@ export class MapRuntime {
     return !!(tile as any).collides
   }
 
+  isWorldBlocked(x: number, y: number) {
+    const tx = Math.floor(x / TILE_SIZE)
+    const ty = Math.floor(y / TILE_SIZE)
+    return this.isTileBlocked(tx, ty)
+  }
+
+  /**
+   * Returns true if there is a clear tile path between the two world points.
+   * Used to prevent hitting enemies through walls.
+   */
+  hasLineOfSight(fromX: number, fromY: number, toX: number, toY: number) {
+    // Grid ray using Bresenham over tile coordinates.
+    const x0 = Math.floor(fromX / TILE_SIZE)
+    const y0 = Math.floor(fromY / TILE_SIZE)
+    const x1 = Math.floor(toX / TILE_SIZE)
+    const y1 = Math.floor(toY / TILE_SIZE)
+
+    let x = x0
+    let y = y0
+    const dx = Math.abs(x1 - x0)
+    const dy = Math.abs(y1 - y0)
+    const sx = x0 < x1 ? 1 : -1
+    const sy = y0 < y1 ? 1 : -1
+
+    let err = dx - dy
+
+    // Exclude the starting tile so standing adjacent to a wall doesn't incorrectly block.
+    while (!(x === x1 && y === y1)) {
+      const e2 = 2 * err
+      if (e2 > -dy) {
+        err -= dy
+        x += sx
+      }
+      if (e2 < dx) {
+        err += dx
+        y += sy
+      }
+
+      if (this.isTileBlocked(x, y)) return false
+    }
+
+    return true
+  }
+
   getWarpTileRects(): WarpTileRect[] {
     const out: WarpTileRect[] = []
     for (const z of this.warpZones) {
