@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local-only art packs (non-redistributable licenses, or large source assets).
+public/tilesets/cute_fantasy/

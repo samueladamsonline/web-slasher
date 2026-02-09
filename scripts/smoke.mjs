@@ -17,7 +17,8 @@ async function getFreePort() {
 }
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : await getFreePort()
-const URL = `http://127.0.0.1:${PORT}/`
+const QUERY = process.env.QUERY ? String(process.env.QUERY) : ''
+const URL = `http://127.0.0.1:${PORT}/${QUERY ? (QUERY.startsWith('?') ? QUERY : `?${QUERY}`) : ''}`
 
 function wait(ms) {
   return new Promise((r) => setTimeout(r, ms))
