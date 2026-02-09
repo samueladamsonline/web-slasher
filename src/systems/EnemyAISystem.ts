@@ -12,7 +12,7 @@ type SlimeState = 'wander' | 'leash' | 'hitstun'
 type SlimeCtx = { enemy: Enemy; seed: number; hitstunUntil: number }
 
 type BatState = 'hover' | 'chase' | 'return' | 'hitstun'
-type BatCtx = { enemy: Enemy; hitstunUntil: number }
+type BatCtx = { enemy: Enemy; hitstunUntil: number; aggroCooldownUntil: number; returningFromLeash: boolean }
 
 type EnemyDamagedEvent = GameEventMap[typeof GAME_EVENTS.ENEMY_DAMAGED]
 type PathResult = { points: Array<{ x: number; y: number }> }
@@ -160,12 +160,13 @@ export class EnemyAISystem {
   }
 
   private createBatController(enemy: Enemy): EnemyController {
-    const ctx: BatCtx = { enemy, hitstunUntil: 0 }
+    const ctx: BatCtx = { enemy, hitstunUntil: 0, aggroCooldownUntil: 0, returningFromLeash: false }
 
     const PATH_RECALC_MS = 220
     const WAYPOINT_RADIUS = 6
     const STUCK_TIMEOUT_MS = 350
     const HOME_RADIUS = 14
+    const AGGRO_COOLDOWN_MS = 1000
 
     const pathState = {
       targetKey: '',
@@ -234,6 +235,15 @@ export class EnemyAISystem {
       const dx = enemy.spawnX - enemy.x
       const dy = enemy.spawnY - enemy.y
       return Math.hypot(dx, dy) > leash
+    }
+
+    // If the player is outside the bat's "territory" (leash radius), don't allow re-aggro loops.
+    // This prevents chase/return flip-flop when aggroRadius > leashRadius.
+    const playerWithinLeashTerritory = () => {
+      const leash = enemy.getLeashRadius()
+      if (!(leash > 0)) return true
+      const p = getPlayerCenter()
+      return Math.hypot(p.x - enemy.spawnX, p.y - enemy.spawnY) <= leash
     }
 
     const followTarget = (targetX: number, targetY: number, key: string, now: number, dt: number) => {
@@ -327,12 +337,13 @@ export class EnemyAISystem {
         hover: {
           onUpdate: (c, now) => {
             if (shouldLeash()) {
+              c.returningFromLeash = true
               fsm.transition('return', c, now)
               return
             }
             const aggro = enemy.getAggroRadius() || 260
             const { dist } = getPlayerVec()
-            if (dist < aggro) {
+            if (dist < aggro && playerWithinLeashTerritory() && now >= c.aggroCooldownUntil) {
               fsm.transition('chase', c, now)
               return
             }
@@ -342,6 +353,7 @@ export class EnemyAISystem {
         chase: {
           onUpdate: (c, now, dt) => {
             if (shouldLeash()) {
+              c.returningFromLeash = true
               fsm.transition('return', c, now)
               return
             }
@@ -349,6 +361,8 @@ export class EnemyAISystem {
             const { dist } = getPlayerVec()
             if (dist > aggro * 1.15) {
               // Lost the player: return home (don't hover where we lost aggro).
+              c.returningFromLeash = false
+              c.aggroCooldownUntil = Math.max(c.aggroCooldownUntil, now + AGGRO_COOLDOWN_MS)
               fsm.transition('return', c, now)
               return
             }
@@ -358,9 +372,9 @@ export class EnemyAISystem {
         },
         return: {
           onUpdate: (c, now, dt) => {
-            // If we're returning due to deaggro (not hard-leashed), re-aggro immediately when the player
-            // comes back into range.
-            if (!shouldLeash()) {
+            // If we're returning due to deaggro (not hard-leashed), re-aggro after cooldown when the
+            // player comes back into range (and is within the bat's leash territory).
+            if (!c.returningFromLeash && !shouldLeash() && now >= c.aggroCooldownUntil && playerWithinLeashTerritory()) {
               const aggro = enemy.getAggroRadius() || 260
               const { dist } = getPlayerVec()
               if (dist < aggro) {
@@ -373,6 +387,7 @@ export class EnemyAISystem {
             const dy = enemy.spawnY - enemy.y
             if (Math.hypot(dx, dy) <= HOME_RADIUS) {
               enemy.setVelocity(0, 0)
+              c.returningFromLeash = false
               fsm.transition('hover', c, now)
               return
             }
@@ -383,12 +398,17 @@ export class EnemyAISystem {
           onUpdate: (c, now) => {
             if (now < c.hitstunUntil) return
             if (shouldLeash()) {
+              c.returningFromLeash = true
               fsm.transition('return', c, now)
               return
             }
             const aggro = enemy.getAggroRadius() || 260
             const { dist } = getPlayerVec()
-            fsm.transition(dist < aggro ? 'chase' : 'return', c, now)
+            if (dist < aggro && playerWithinLeashTerritory() && now >= c.aggroCooldownUntil) {
+              fsm.transition('chase', c, now)
+              return
+            }
+            fsm.transition('return', c, now)
           },
         },
       },

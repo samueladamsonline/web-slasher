@@ -1169,9 +1169,14 @@ try {
         }, { spawn })
         if (!(typeof dAway === 'number' && dAway > 20)) throw new Error(`expected bat to move away from spawn while chasing; dAway=${dAway}`)
 
+        // Deaggro sanity: leave aggro, then re-enter aggro quickly. The bat should keep returning
+        // for a short cooldown (prevents boundary jitter), then re-aggro after.
         await teleportPlayer(page, 100, 100)
-        await page.waitForTimeout(900)
-        const dReturn = await page.evaluate(({ spawn }) => {
+        await page.waitForTimeout(220)
+
+        await teleportPlayer(page, spawn.x - 120, spawn.y)
+        await page.waitForTimeout(120)
+        const home0 = await page.evaluate(({ spawn }) => {
           const scene = globalThis.__dbg?.player?.scene
           const group = scene?.mapRuntime?.enemies
           const kids = group?.getChildren?.() ?? []
@@ -1179,20 +1184,30 @@ try {
           if (!e) return null
           return Math.hypot(e.x - spawn.x, e.y - spawn.y)
         }, { spawn })
-        if (!(typeof dReturn === 'number' && dReturn < dAway - 6))
-          throw new Error(`expected bat to return toward spawn after deaggro; dAway=${dAway} dReturn=${dReturn}`)
 
-        // Re-aggro sanity: if the player re-enters aggro while the bat is returning home,
-        // it should chase again (not stay in a "return forever" mode).
+        await page.waitForTimeout(600)
+        const home1 = await page.evaluate(({ spawn }) => {
+          const scene = globalThis.__dbg?.player?.scene
+          const group = scene?.mapRuntime?.enemies
+          const kids = group?.getChildren?.() ?? []
+          const e = kids.find((k) => k?.active && k?.kind === 'bat')
+          if (!e) return null
+          return Math.hypot(e.x - spawn.x, e.y - spawn.y)
+        }, { spawn })
+
+        if (!(typeof home0 === 'number' && typeof home1 === 'number'))
+          throw new Error(`bat missing for cooldown check; home0=${home0} home1=${home1}`)
+        if (!(home1 < home0 - 2))
+          throw new Error(`expected bat to keep returning during cooldown; home0=${home0} home1=${home1}`)
+
+        // Re-aggro sanity: after the cooldown expires, the bat should chase again.
         const maxHp2 = await getPlayerMaxHp(page)
         if (typeof maxHp2 === 'number') await setPlayerHp(page, maxHp2)
         await page.waitForTimeout(80)
 
-        await teleportPlayer(page, spawn.x - 120, spawn.y)
-        await page.waitForTimeout(120)
         let reAggroTouch = false
         const reAggroStart = Date.now()
-        while (Date.now() - reAggroStart < 2200) {
+        while (Date.now() - reAggroStart < 3500) {
           if (await isPlayerInTouchRange(page, 'bat')) {
             reAggroTouch = true
             break
