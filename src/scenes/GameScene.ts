@@ -25,11 +25,13 @@ export class GameScene extends Phaser.Scene {
   private hero!: Hero
   private speed = 240
   private debugAttackQueued = false
+  private cleanedUp = false
 
   private mapRuntime!: MapRuntime
   private combat!: CombatSystem
   private enemyAI!: EnemyAISystem
   private health!: PlayerHealthSystem
+  private loot!: LootSystem
   private world!: WorldState
   private inventory!: InventorySystem
   private pickups!: PickupSystem
@@ -77,6 +79,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   create() {
+    // If this Scene is restarted, `create()` runs again on the same instance.
+    // Reset cleanup guard and install a fresh shutdown hook.
+    this.cleanedUp = false
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.onShutdown, this)
+    this.events.once(Phaser.Scenes.Events.DESTROY, this.onShutdown, this)
+
     this.controls = new InputSystem(this)
 
     this.hero = new Hero(this, 0, 0)
@@ -129,7 +137,7 @@ export class GameScene extends Phaser.Scene {
 
     this.pickups = new PickupSystem(this, this.hero, { inventory: this.inventory, health: this.health, world: this.world })
     // LootSystem listens for enemy death events and spawns drops via PickupSystem.
-    new LootSystem(this, this.pickups)
+    this.loot = new LootSystem(this, this.pickups)
     this.interactions = new InteractionSystem(
       this,
       this.hero,
@@ -160,6 +168,39 @@ export class GameScene extends Phaser.Scene {
     void this.refreshStartMenuState()
 
     this.refreshDbg()
+  }
+
+  private onShutdown() {
+    if (this.cleanedUp) return
+    this.cleanedUp = true
+
+    // Stop autosaves and detach callbacks so we don't keep touching LocalStorage after shutdown.
+    this.save?.setEnabled?.(false)
+    this.inventory?.setOnChanged?.(undefined)
+    this.world?.setOnChanged?.(undefined)
+
+    this.enemyAI?.destroy?.()
+    this.loot?.destroy?.()
+    this.health?.destroy?.()
+    this.pickups?.clear?.()
+    this.interactions?.destroy?.()
+    this.mapRuntime?.destroy?.()
+
+    this.minimap?.destroy?.()
+    this.inventoryUI?.destroy?.()
+    this.mapNameUI?.destroy?.()
+    this.dialogueUI?.destroy?.()
+    this.promptUI?.destroy?.()
+    this.overlay?.destroy?.()
+
+    // Avoid leaking references to dead objects into tests/devtools between restarts.
+    if (typeof window !== 'undefined') {
+      try {
+        delete (window as any).__dbg
+      } catch {
+        ;(window as any).__dbg = undefined
+      }
+    }
   }
 
   update(_time: number, delta: number) {
