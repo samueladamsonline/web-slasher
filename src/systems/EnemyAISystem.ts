@@ -11,30 +11,35 @@ type EnemyController = {
 type SlimeState = 'wander' | 'leash' | 'hitstun'
 type SlimeCtx = { enemy: Enemy; seed: number; hitstunUntil: number }
 
-type BatState = 'hover' | 'chase' | 'hitstun'
+type BatState = 'hover' | 'chase' | 'return' | 'hitstun'
 type BatCtx = { enemy: Enemy; hitstunUntil: number }
 
 type EnemyDamagedEvent = GameEventMap[typeof GAME_EVENTS.ENEMY_DAMAGED]
+type PathResult = { points: Array<{ x: number; y: number }> }
 
 export class EnemyAISystem {
   private scene: Phaser.Scene
   private player: Phaser.Physics.Arcade.Sprite
   private getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined
-  private isWorldBlocked?: (x: number, y: number) => boolean
+  private findPath?: (fromX: number, fromY: number, toX: number, toY: number) => PathResult | null
+  private hasLineOfSight?: (fromX: number, fromY: number, toX: number, toY: number) => boolean
 
   private controllers = new WeakMap<Enemy, EnemyController>()
-  private lastSafePos = new WeakMap<Enemy, { x: number; y: number }>()
 
   constructor(
     scene: Phaser.Scene,
     player: Phaser.Physics.Arcade.Sprite,
     getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined,
-    opts?: { isWorldBlocked?: (x: number, y: number) => boolean },
+    opts?: {
+      findPath?: (fromX: number, fromY: number, toX: number, toY: number) => PathResult | null
+      hasLineOfSight?: (fromX: number, fromY: number, toX: number, toY: number) => boolean
+    },
   ) {
     this.scene = scene
     this.player = player
     this.getEnemyGroup = getEnemyGroup
-    this.isWorldBlocked = opts?.isWorldBlocked
+    this.findPath = opts?.findPath
+    this.hasLineOfSight = opts?.hasLineOfSight
 
     onGameEvent(this.scene.events, GAME_EVENTS.ENEMY_DAMAGED, this.onEnemyDamaged)
   }
@@ -53,36 +58,8 @@ export class EnemyAISystem {
       if (!go.active) continue
       const body = go.body as Phaser.Physics.Arcade.Body | null
       if (!body || !body.enable) continue
-      this.recordSafePos(go)
       this.getController(go).update(now, dt)
-      this.enforceNotInBlockedTile(go)
     }
-  }
-
-  private recordSafePos(enemy: Enemy) {
-    if (!this.isWorldBlocked) return
-    const body = enemy.body as Phaser.Physics.Arcade.Body | null
-    const cxRaw = body?.center?.x
-    const cyRaw = body?.center?.y
-    const cx = Number.isFinite(cxRaw) ? (cxRaw as number) : enemy.x
-    const cy = Number.isFinite(cyRaw) ? (cyRaw as number) : enemy.y
-    if (this.isWorldBlocked(cx, cy)) return
-    this.lastSafePos.set(enemy, { x: enemy.x, y: enemy.y })
-  }
-
-  private enforceNotInBlockedTile(enemy: Enemy) {
-    if (!this.isWorldBlocked) return
-    const body = enemy.body as Phaser.Physics.Arcade.Body | null
-    const cxRaw = body?.center?.x
-    const cyRaw = body?.center?.y
-    const cx = Number.isFinite(cxRaw) ? (cxRaw as number) : enemy.x
-    const cy = Number.isFinite(cyRaw) ? (cyRaw as number) : enemy.y
-    if (!this.isWorldBlocked(cx, cy)) return
-
-    const safe = this.lastSafePos.get(enemy) ?? { x: enemy.spawnX, y: enemy.spawnY }
-    if (body && typeof body.reset === 'function') body.reset(safe.x, safe.y)
-    else enemy.setPosition(safe.x, safe.y)
-    enemy.setVelocity(0, 0)
   }
 
   private onEnemyDamaged = (ev: EnemyDamagedEvent) => {
@@ -185,6 +162,28 @@ export class EnemyAISystem {
   private createBatController(enemy: Enemy): EnemyController {
     const ctx: BatCtx = { enemy, hitstunUntil: 0 }
 
+    const PATH_RECALC_MS = 220
+    const WAYPOINT_RADIUS = 6
+    const STUCK_TIMEOUT_MS = 350
+
+    const pathState = {
+      targetKey: '',
+      points: [] as Array<{ x: number; y: number }>,
+      index: 0,
+      lastComputeAt: -Infinity,
+      lastTarget: { x: 0, y: 0 },
+      lastProgressAt: 0,
+      lastDist: Number.POSITIVE_INFINITY,
+    }
+
+    const clearPath = () => {
+      pathState.points = []
+      pathState.index = 0
+      pathState.lastComputeAt = -Infinity
+      pathState.lastProgressAt = 0
+      pathState.lastDist = Number.POSITIVE_INFINITY
+    }
+
     const getPlayerCenter = () => {
       const body = this.player.body as Phaser.Physics.Arcade.Body | undefined
       const cx = body?.center?.x
@@ -212,16 +211,88 @@ export class EnemyAISystem {
       return { dx, dy, dist: dist0 }
     }
 
-    const chase = (dt: number) => {
+    const seek = (targetX: number, targetY: number, dt: number) => {
       const speed = enemy.getMoveSpeed()
-      const { dx, dy, dist } = getPlayerVec()
+      const e = getEnemyCenter()
+      const dx = targetX - e.x
+      const dy = targetY - e.y
+      const dist = Math.hypot(dx, dy)
       if (dist <= 0.5 || speed <= 0) {
         enemy.setVelocity(0, 0)
-        return
+        return dist
       }
       const dtSec = Math.max(0.001, dt / 1000)
       const maxSpeed = Math.min(speed, dist / dtSec)
       enemy.setVelocity((dx / dist) * maxSpeed, (dy / dist) * maxSpeed)
+      return dist
+    }
+
+    const shouldLeash = () => {
+      const leash = enemy.getLeashRadius()
+      if (!(leash > 0)) return false
+      const dx = enemy.spawnX - enemy.x
+      const dy = enemy.spawnY - enemy.y
+      return Math.hypot(dx, dy) > leash
+    }
+
+    const followTarget = (targetX: number, targetY: number, key: string, now: number, dt: number) => {
+      if (pathState.targetKey !== key) {
+        pathState.targetKey = key
+        clearPath()
+      }
+
+      const lineOfSight = this.hasLineOfSight?.(enemy.x, enemy.y, targetX, targetY) ?? true
+      if (lineOfSight) {
+        clearPath()
+        pathState.lastTarget = { x: targetX, y: targetY }
+        seek(targetX, targetY, dt)
+        return
+      }
+
+      const targetMoved = Math.hypot(targetX - pathState.lastTarget.x, targetY - pathState.lastTarget.y) > 12
+      const shouldRepath =
+        !this.findPath ||
+        targetMoved ||
+        now - pathState.lastComputeAt > PATH_RECALC_MS ||
+        pathState.points.length === 0
+
+      if (shouldRepath && this.findPath) {
+        const res = this.findPath(enemy.x, enemy.y, targetX, targetY)
+        if (res?.points?.length) {
+          pathState.points = res.points
+          pathState.index = 0
+          pathState.lastDist = Number.POSITIVE_INFINITY
+          pathState.lastProgressAt = now
+        } else {
+          pathState.points = []
+          pathState.index = 0
+        }
+        pathState.lastComputeAt = now
+      }
+
+      pathState.lastTarget = { x: targetX, y: targetY }
+
+      let target = pathState.points[pathState.index]
+      const e = getEnemyCenter()
+      while (target) {
+        const dist = Math.hypot(target.x - e.x, target.y - e.y)
+        if (dist > WAYPOINT_RADIUS || pathState.index >= pathState.points.length - 1) break
+        pathState.index += 1
+        target = pathState.points[pathState.index]
+      }
+
+      if (!target) {
+        seek(targetX, targetY, dt)
+        return
+      }
+
+      const dist = seek(target.x, target.y, dt)
+      if (dist < pathState.lastDist - 0.5) {
+        pathState.lastDist = dist
+        pathState.lastProgressAt = now
+      } else if (now - pathState.lastProgressAt > STUCK_TIMEOUT_MS) {
+        clearPath()
+      }
     }
 
     const hover = (now: number) => {
@@ -245,6 +316,10 @@ export class EnemyAISystem {
       handlers: {
         hover: {
           onUpdate: (c, now) => {
+            if (shouldLeash()) {
+              fsm.transition('return', c, now)
+              return
+            }
             const aggro = enemy.getAggroRadius() || 260
             const { dist } = getPlayerVec()
             if (dist < aggro) {
@@ -256,18 +331,36 @@ export class EnemyAISystem {
         },
         chase: {
           onUpdate: (c, now, dt) => {
+            if (shouldLeash()) {
+              fsm.transition('return', c, now)
+              return
+            }
             const aggro = enemy.getAggroRadius() || 260
             const { dist } = getPlayerVec()
             if (dist > aggro * 1.15) {
               fsm.transition('hover', c, now)
               return
             }
-            chase(dt)
+            const p = getPlayerCenter()
+            followTarget(p.x, p.y, 'player', now, dt)
+          },
+        },
+        return: {
+          onUpdate: (c, now, dt) => {
+            if (!shouldLeash()) {
+              fsm.transition('hover', c, now)
+              return
+            }
+            followTarget(enemy.spawnX, enemy.spawnY, 'spawn', now, dt)
           },
         },
         hitstun: {
           onUpdate: (c, now) => {
             if (now < c.hitstunUntil) return
+            if (shouldLeash()) {
+              fsm.transition('return', c, now)
+              return
+            }
             const aggro = enemy.getAggroRadius() || 260
             const { dist } = getPlayerVec()
             fsm.transition(dist < aggro ? 'chase' : 'hover', c, now)

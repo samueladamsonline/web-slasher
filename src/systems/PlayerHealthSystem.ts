@@ -17,6 +17,8 @@ export class PlayerHealthSystem {
 
   private overlap?: Phaser.Physics.Arcade.Collider
   private ui: HeartsUI
+  private prevPlayerPos: { x: number; y: number } | null = null
+  private prevEnemyPos = new WeakMap<Enemy, { x: number; y: number }>()
 
   constructor(scene: Phaser.Scene, player: Hero, getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined) {
     this.scene = scene
@@ -35,6 +37,9 @@ export class PlayerHealthSystem {
     this.overlap?.destroy()
     const group = this.getEnemyGroup()
     if (!group) return
+    const pBody = this.player.body as Phaser.Physics.Arcade.Body | undefined
+    this.prevPlayerPos = { x: pBody?.center?.x ?? this.player.x, y: pBody?.center?.y ?? this.player.y }
+    this.prevEnemyPos = new WeakMap()
 
     // Use overlap for damage (collider for blocking is handled by MapRuntime + enemy immovable).
     this.overlap = this.scene.physics.add.overlap(this.player, group, (_p, e) => {
@@ -69,6 +74,9 @@ export class PlayerHealthSystem {
     this.invulnUntil = 0
     this.warpLockUntil = 0
     this.ui.set(this.maxHp, this.hp)
+    const pBody = this.player.body as Phaser.Physics.Arcade.Body | undefined
+    this.prevPlayerPos = { x: pBody?.center?.x ?? this.player.x, y: pBody?.center?.y ?? this.player.y }
+    this.prevEnemyPos = new WeakMap()
   }
 
   canWarp() {
@@ -76,14 +84,15 @@ export class PlayerHealthSystem {
   }
 
   update() {
-    // Touch damage is driven by the physics overlap callback set up in onMapChanged().
-    // We also do a lightweight proximity check so fast/small enemies don't "tunnel" past
-    // the player without triggering overlap.
+    // Touch damage is primarily driven by the physics overlap callback set up in onMapChanged().
+    // We also run a swept-circle check to catch tunneling for fast/small enemies.
     const now = this.scene.time.now
-    if (now < this.invulnUntil) return
 
     const group = this.getEnemyGroup()
-    if (!group) return
+    if (!group) {
+      this.prevPlayerPos = null
+      return
+    }
 
     const pBody = this.player.body as Phaser.Physics.Arcade.Body | undefined
     const px = pBody?.center?.x ?? this.player.x
@@ -92,22 +101,35 @@ export class PlayerHealthSystem {
     const ph = typeof pBody?.height === 'number' ? pBody.height : 0
     const pr = Math.max(pw, ph) * 0.5 + this.touchRadiusPadding
 
+    const pPrev = this.prevPlayerPos ?? { x: px, y: py }
+    const pDelta = { x: px - pPrev.x, y: py - pPrev.y }
+
     const enemies = group.getChildren() as unknown as Phaser.GameObjects.GameObject[]
     for (const go of enemies) {
       if (!(go instanceof Enemy)) continue
       if (!go.active) continue
       const body = go.body as Phaser.Physics.Arcade.Body | null
       if (!body || !body.enable) continue
+
       const ex = body?.center?.x ?? go.x
       const ey = body?.center?.y ?? go.y
-      const dx = ex - px
-      const dy = ey - py
+      const ePrev = this.prevEnemyPos.get(go) ?? { x: ex, y: ey }
+      const eDelta = { x: ex - ePrev.x, y: ey - ePrev.y }
+
+      this.prevEnemyPos.set(go, { x: ex, y: ey })
       const r = pr + go.getTouchRadius()
-      if (dx * dx + dy * dy <= r * r) {
+      const hit = segmentIntersectsCircle(
+        { x: ePrev.x - pPrev.x, y: ePrev.y - pPrev.y },
+        { x: ePrev.x - pPrev.x + (eDelta.x - pDelta.x), y: ePrev.y - pPrev.y + (eDelta.y - pDelta.y) },
+        r,
+      )
+      if (hit && now >= this.invulnUntil) {
         this.tryTouchDamage(go)
-        if (this.scene.time.now < this.invulnUntil) return
+        if (this.scene.time.now < this.invulnUntil) break
       }
     }
+
+    this.prevPlayerPos = { x: px, y: py }
   }
 
   private tryTouchDamage(enemy: Enemy) {
@@ -142,4 +164,16 @@ export class PlayerHealthSystem {
   }
 
   // (no tile-based helpers needed)
+}
+
+function segmentIntersectsCircle(start: { x: number; y: number }, end: { x: number; y: number }, radius: number) {
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  const a = dx * dx + dy * dy
+  if (a < 0.0001) return start.x * start.x + start.y * start.y <= radius * radius
+
+  const t = Math.max(0, Math.min(1, -(start.x * dx + start.y * dy) / a))
+  const cx = start.x + dx * t
+  const cy = start.y + dy * t
+  return cx * cx + cy * cy <= radius * radius
 }

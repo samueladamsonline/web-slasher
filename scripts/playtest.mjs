@@ -469,8 +469,8 @@ async function findOpenTileSample(page, radius = 2) {
   )
 }
 
-async function findChaseSetup(page) {
-  return await page.evaluate(() => {
+async function findChaseSetup(page, origin) {
+  return await page.evaluate(({ origin }) => {
     const scene = globalThis.__dbg?.player?.scene
     const rt = scene?.mapRuntime
     const map = rt?.state?.map
@@ -487,9 +487,15 @@ async function findChaseSetup(page) {
 
     const arenaRadius = 6
     const arenaSpacing = Math.min(120, tile * (arenaRadius - 2))
+    const originTx = typeof origin?.x === 'number' ? Math.floor(origin.x / tile) : Math.floor(w / 2)
+    const originTy = typeof origin?.y === 'number' ? Math.floor(origin.y / tile) : Math.floor(h / 2)
+    const searchRadius = 8
     if (arenaSpacing > 0) {
-      for (let ty = arenaRadius; ty < h - arenaRadius; ty++) {
-        for (let tx = arenaRadius; tx < w - arenaRadius; tx++) {
+      for (let dy0 = -searchRadius; dy0 <= searchRadius; dy0++) {
+        for (let dx0 = -searchRadius; dx0 <= searchRadius; dx0++) {
+          const tx = originTx + dx0
+          const ty = originTy + dy0
+          if (tx < arenaRadius || ty < arenaRadius || tx >= w - arenaRadius || ty >= h - arenaRadius) continue
           let ok = true
           for (let dy = -arenaRadius; dy <= arenaRadius; dy++) {
             for (let dx = -arenaRadius; dx <= arenaRadius; dx++) {
@@ -537,7 +543,7 @@ async function findChaseSetup(page) {
     }
 
     return null
-  })
+  }, { origin })
 }
 
 async function isPlayerInTouchRange(page, kind) {
@@ -1003,12 +1009,42 @@ try {
 	      await page.keyboard.up('d')
 	    }
 
-	    // AI sanity: slime should wander even if player is far away.
+    // AI sanity: slime should wander even if player is far away.
 	    try {
 	      await teleportPlayer(page, 100, 100)
 	      await waitForEnemyMove(page, 'slime', 6, 3000)
     } catch (e) {
       errors.push(`expected slime to move (AI); ${String(e?.message ?? e)}`)
+    }
+
+    // Pathfinding sanity: findPath should return a walkable tile path.
+    try {
+      const pathSetup = await findChaseSetup(page, bat ?? null)
+      let from = pathSetup?.bat ?? null
+      let to = pathSetup?.player ?? null
+      if (!from || !to) {
+        const open = await findOpenTileSample(page, 3)
+        if (open) {
+          from = { x: open.x - open.tile * 4, y: open.y }
+          to = { x: open.x + open.tile * 4, y: open.y }
+        }
+      }
+      if (!from || !to) throw new Error('no open tiles available for path test')
+
+      const res = await page.evaluate(({ from, to }) => {
+        const scene = globalThis.__dbg?.player?.scene
+        const rt = scene?.mapRuntime
+        if (!rt?.findPath) return { ok: false, error: 'no-findPath' }
+        const path = rt.findPath(from.x, from.y, to.x, to.y)
+        if (!path || !Array.isArray(path.tiles) || path.tiles.length < 2) return { ok: false, error: 'no-path' }
+        const bad = path.tiles.find((t) => rt.isTileBlocked?.(t.tx, t.ty))
+        if (bad) return { ok: false, error: `blocked:${bad.tx},${bad.ty}` }
+        return { ok: true, len: path.tiles.length }
+      }, { from, to })
+
+      if (!res?.ok) throw new Error(`path invalid: ${JSON.stringify(res)}`)
+    } catch (e) {
+      errors.push(`expected pathfinding (AI); ${String(e?.message ?? e)}`)
     }
 
     // AI sanity: bat should chase when player is within aggro radius.
@@ -1020,7 +1056,7 @@ try {
 
         const open = await findOpenTileSample(page, 2)
         const openPos = open ? { x: open.x, y: open.y, tile: open.tile } : null
-        const chaseSetup = await findChaseSetup(page)
+        const chaseSetup = await findChaseSetup(page, b0)
         if (chaseSetup) {
           await teleportPlayer(page, chaseSetup.player.x, chaseSetup.player.y)
           await teleportEnemy(page, 'bat', chaseSetup.bat.x, chaseSetup.bat.y)
@@ -1046,7 +1082,7 @@ try {
 
         let inRange = false
         const touchStartDamage = Date.now()
-        while (Date.now() - touchStartDamage < 1500) {
+        while (Date.now() - touchStartDamage < 2000) {
           if (await isPlayerInTouchRange(page, 'bat')) {
             inRange = true
             break
@@ -1085,7 +1121,12 @@ try {
         const maxHp = await getPlayerMaxHp(page)
         if (typeof maxHp === 'number') await setPlayerHp(page, maxHp)
         await page.waitForTimeout(900)
-        if (openPos) {
+        if (chaseSetup) {
+          const diag = Math.max(60, Math.min(90, chaseSetup.spacing ?? 90))
+          await teleportPlayer(page, chaseSetup.player.x, chaseSetup.player.y)
+          await teleportEnemy(page, 'bat', chaseSetup.player.x + diag, chaseSetup.player.y + diag)
+          await page.waitForTimeout(120)
+        } else if (openPos) {
           await teleportPlayer(page, openPos.x, openPos.y)
           await teleportEnemy(page, 'bat', openPos.x + Math.max(90, openPos.tile * 4), openPos.y + Math.max(90, openPos.tile * 4))
           await page.waitForTimeout(120)
@@ -1094,7 +1135,7 @@ try {
         if (typeof hp0 !== 'number') throw new Error(`hp0 not numeric before bat touch; hp0=${hp0}`)
         let hp1 = hp0
         const touchStart = Date.now()
-        while (Date.now() - touchStart < 1500) {
+        while (Date.now() - touchStart < 2000) {
           const hpNow = await getPlayerHp(page)
           if (typeof hpNow === 'number') {
             hp1 = hpNow

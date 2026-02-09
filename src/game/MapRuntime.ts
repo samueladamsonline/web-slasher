@@ -1,6 +1,7 @@
 import * as Phaser from 'phaser'
 import { Enemy } from '../entities/Enemy'
 import { DEPTH_GROUND, DEPTH_PLAYER, DEPTH_WARP, TILE_SIZE } from './constants'
+import { findPath as findGridPath, simplifyPath, type TilePoint } from './pathfinding'
 import type { MapKey } from './types'
 import type { InteractionSystem } from '../systems/InteractionSystem'
 import type { PickupSystem } from '../systems/PickupSystem'
@@ -101,6 +102,25 @@ export class MapRuntime {
     const tx = Math.floor(x / TILE_SIZE)
     const ty = Math.floor(y / TILE_SIZE)
     return this.isTileBlocked(tx, ty)
+  }
+
+  findPath(fromX: number, fromY: number, toX: number, toY: number, opts?: { maxNodes?: number }) {
+    const s = this.state
+    if (!s) return null
+    const w = s.map.width
+    const h = s.map.height
+    const start: TilePoint = { tx: Math.floor(fromX / TILE_SIZE), ty: Math.floor(fromY / TILE_SIZE) }
+    const goal: TilePoint = { tx: Math.floor(toX / TILE_SIZE), ty: Math.floor(toY / TILE_SIZE) }
+    const grid = {
+      w,
+      h,
+      isBlocked: (tx: number, ty: number) => this.isTileBlocked(tx, ty),
+    }
+    const tiles = findGridPath(grid, start, goal, { maxNodes: opts?.maxNodes })
+    if (!tiles || tiles.length === 0) return null
+    const simplified = simplifyPath(tiles)
+    const points = simplified.map((t) => ({ x: t.tx * TILE_SIZE + TILE_SIZE / 2, y: t.ty * TILE_SIZE + TILE_SIZE / 2 }))
+    return { tiles: simplified, points }
   }
 
   /**

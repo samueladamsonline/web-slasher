@@ -152,7 +152,8 @@ export class GameScene extends Phaser.Scene {
     this.mapRuntime.setInteractionSystem(this.interactions)
 
     this.enemyAI = new EnemyAISystem(this, this.hero, () => this.mapRuntime.enemies, {
-      isWorldBlocked: (x, y) => this.mapRuntime.isWorldBlocked(x, y),
+      findPath: (fromX, fromY, toX, toY) => this.mapRuntime.findPath(fromX, fromY, toX, toY),
+      hasLineOfSight: (fromX, fromY, toX, toY) => this.mapRuntime.hasLineOfSight(fromX, fromY, toX, toY),
     })
 
     this.minimap = new MinimapUI(this, this.hero, {
