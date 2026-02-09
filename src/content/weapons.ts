@@ -2,6 +2,8 @@ import type { Facing } from '../game/types'
 
 export type WeaponId = 'sword' | 'greatsword'
 
+export type WeaponHands = 1 | 2
+
 export type WeaponHitbox = {
   offset: number
   w: number
@@ -26,6 +28,7 @@ export type WeaponTimings = {
 export type WeaponDef = {
   id: WeaponId
   name: string
+  hands: WeaponHands
   damage: number
   // Total time between attack presses (windup + active + recovery).
   cooldownMs: number
@@ -39,7 +42,8 @@ export type WeaponDef = {
 export const WEAPONS: Record<WeaponId, WeaponDef> = {
   sword: {
     id: 'sword',
-    name: 'Sword',
+    name: 'Short Sword',
+    hands: 1,
     damage: 1,
     cooldownMs: 260,
     hitbox: { offset: 42, w: 50, h: 34 },
@@ -48,7 +52,8 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   },
   greatsword: {
     id: 'greatsword',
-    name: 'Greatsword',
+    name: 'Long Sword',
+    hands: 2,
     damage: 2,
     cooldownMs: 390,
     hitbox: { offset: 46, w: 66, h: 40 },

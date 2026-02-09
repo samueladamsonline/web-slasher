@@ -17,6 +17,7 @@ import { InteractPromptUI } from '../ui/InteractPromptUI'
 import { MapNameUI } from '../ui/MapNameUI'
 import { MinimapUI } from '../ui/MinimapUI'
 import { OverlayUI } from '../ui/OverlayUI'
+import { InventoryUI } from '../ui/InventoryUI'
 import { WorldState } from '../game/WorldState'
 
 export class GameScene extends Phaser.Scene {
@@ -39,6 +40,7 @@ export class GameScene extends Phaser.Scene {
   private mapNameUI!: MapNameUI
   private minimap!: MinimapUI
   private overlay!: OverlayUI
+  private inventoryUI!: InventoryUI
 
   private startMenu = true
   private startLoading = true
@@ -71,6 +73,7 @@ export class GameScene extends Phaser.Scene {
     HeartsUI.preload(this)
     PickupSystem.preload(this)
     InteractionSystem.preload(this)
+    InventoryUI.preload(this)
   }
 
   create() {
@@ -88,6 +91,7 @@ export class GameScene extends Phaser.Scene {
 
     this.world = new WorldState()
     this.inventory = new InventorySystem()
+    this.inventoryUI = new InventoryUI(this, this.inventory)
     this.save = new SaveSystem({
       inventory: this.inventory,
       world: this.world,
@@ -95,7 +99,10 @@ export class GameScene extends Phaser.Scene {
     })
     // Only start saving once the player starts a new game or continues.
     this.save.setEnabled(false)
-    this.inventory.setOnChanged(() => this.save.requestSave())
+    this.inventory.setOnChanged(() => {
+      this.save.requestSave()
+      if (this.inventoryUI?.isVisible?.()) this.inventoryUI.refresh()
+    })
     this.world.setOnChanged(() => this.save.requestSave())
 
     this.mapRuntime = new MapRuntime(this, this.hero, {
@@ -203,13 +210,11 @@ export class GameScene extends Phaser.Scene {
 
     if (this.controls.justPressed('weapon1')) {
       if (this.inventory.equipWeapon('sword')) {
-        if (this.paused && this.pauseMode === 'inventory') this.overlay.showInventory(this.inventory.getInventoryLines())
         this.refreshDbg()
       }
     }
     if (this.controls.justPressed('weapon2')) {
       if (this.inventory.equipWeapon('greatsword')) {
-        if (this.paused && this.pauseMode === 'inventory') this.overlay.showInventory(this.inventory.getInventoryLines())
         this.refreshDbg()
       }
     }
@@ -279,6 +284,16 @@ export class GameScene extends Phaser.Scene {
         if (id === 'sword' || id === 'greatsword') return this.inventory?.equipWeapon?.(id)
         return false
       },
+      moveInvItem: (from: any, to: any) => {
+        const isSlot = (v: any) => {
+          if (!v || typeof v !== 'object') return false
+          if (v.type === 'equip') return v.slot === 'helmet' || v.slot === 'chest' || v.slot === 'gloves' || v.slot === 'boots' || v.slot === 'weapon' || v.slot === 'shield'
+          if (v.type === 'bag') return typeof v.index === 'number' && Number.isFinite(v.index)
+          return false
+        }
+        if (!isSlot(from) || !isSlot(to)) return { ok: false, error: 'bad-args' }
+        return this.inventory?.moveItem?.(from, to) ?? { ok: false, error: 'no-inventory' }
+      },
       getPlayerHp: () => this.health?.getHp?.() ?? null,
       getPlayerMaxHp: () => this.health?.getMaxHp?.() ?? null,
       setPlayerHp: (hp: number) => this.health?.setHp?.(hp),
@@ -336,15 +351,18 @@ export class GameScene extends Phaser.Scene {
       this.anims.pauseAll()
 
       this.minimap?.setMiniVisible?.(false)
+      this.minimap?.setMapVisible?.(false)
+      this.inventoryUI?.hide?.()
 
       if (this.pauseMode === 'map') {
         this.overlay.hide()
         this.minimap?.setMapVisible?.(true)
       } else if (this.pauseMode === 'inventory') {
-        this.minimap?.setMapVisible?.(false)
-        this.overlay.showInventory(this.inventory.getInventoryLines())
+        this.overlay.hide()
+        this.inventoryUI?.show?.()
       } else {
         this.minimap?.setMapVisible?.(false)
+        this.inventoryUI?.hide?.()
         this.overlay.showPause(['ESC: Resume', 'I: Inventory', 'M: Map'])
       }
     } else {
@@ -356,6 +374,7 @@ export class GameScene extends Phaser.Scene {
       this.overlay.hide()
       this.minimap?.setMapVisible?.(false)
       this.minimap?.setMiniVisible?.(true)
+      this.inventoryUI?.hide?.()
     }
   }
 
@@ -388,6 +407,7 @@ export class GameScene extends Phaser.Scene {
     this.hero.setVelocity(0, 0)
     this.physics.world.pause()
     this.anims.pauseAll()
+    this.inventoryUI?.hide?.()
     this.overlay.showGameOver(['Press ENTER to respawn at last checkpoint.'])
   }
 
@@ -436,6 +456,7 @@ export class GameScene extends Phaser.Scene {
     this.anims.pauseAll()
     this.minimap?.setMiniVisible?.(false)
     this.minimap?.setMapVisible?.(false)
+    this.inventoryUI?.hide?.()
 
     const lines: string[] = []
     if (this.startBusy) {

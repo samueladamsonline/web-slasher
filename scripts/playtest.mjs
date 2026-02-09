@@ -497,6 +497,65 @@ try {
     const inv0 = await getInventory(page)
     if (!(inv0 && typeof inv0.coins === 'number' && typeof inv0.keys === 'number')) throw new Error(`bad inventory snapshot: ${JSON.stringify(inv0)}`)
 
+    // Equipment/backpack sanity: starter gear should be equipped.
+    if (!inv0.equipment || typeof inv0.equipment !== 'object') throw new Error(`expected equipment state; inv0=${JSON.stringify(inv0)}`)
+    if (inv0.equipment.weapon !== 'sword') throw new Error(`expected starter weapon=sword; got ${String(inv0.equipment.weapon)}`)
+    if (inv0.equipment.shield !== 'shield_basic') throw new Error(`expected starter shield equipped; got ${String(inv0.equipment.shield)}`)
+    if (inv0.equipment.helmet !== 'helmet_basic') throw new Error(`expected starter helmet equipped; got ${String(inv0.equipment.helmet)}`)
+    if (inv0.equipment.chest !== 'chest_basic') throw new Error(`expected starter chest equipped; got ${String(inv0.equipment.chest)}`)
+    if (inv0.equipment.gloves !== 'gloves_basic') throw new Error(`expected starter gloves equipped; got ${String(inv0.equipment.gloves)}`)
+    if (inv0.equipment.boots !== 'boots_basic') throw new Error(`expected starter boots equipped; got ${String(inv0.equipment.boots)}`)
+    if (!Array.isArray(inv0.bag) || inv0.bag.length < 8) throw new Error(`expected bag array; inv0=${JSON.stringify(inv0)}`)
+    const hasLongSword = inv0.bag.some((s) => s?.id === 'greatsword')
+    if (!hasLongSword) throw new Error(`expected starter bag to include greatsword; bag=${JSON.stringify(inv0.bag)}`)
+
+    // 2H weapon rule: equipping greatsword should unequip shield, and shield should not be equippable while 2H is active.
+    await equipWeapon(page, 'greatsword')
+    await page.waitForTimeout(80)
+    const inv2h = await getInventory(page)
+    if (!inv2h?.equipment) throw new Error(`missing equipment after equipping greatsword; inv=${JSON.stringify(inv2h)}`)
+    if (inv2h.equipment.weapon !== 'greatsword') throw new Error(`expected weapon=greatsword; got ${String(inv2h.equipment.weapon)}`)
+    if (inv2h.equipment.shield !== null) throw new Error(`expected shield to be unequipped with 2H; got ${String(inv2h.equipment.shield)}`)
+    const shieldIdx = Array.isArray(inv2h.bag) ? inv2h.bag.findIndex((s) => s?.id === 'shield_basic') : -1
+    if (shieldIdx < 0) throw new Error(`expected shield to be moved into bag; bag=${JSON.stringify(inv2h.bag)}`)
+    const moveShieldFail = await page.evaluate(({ shieldIdx }) => globalThis.__dbg?.moveInvItem?.({ type: 'bag', index: shieldIdx }, { type: 'equip', slot: 'shield' }), {
+      shieldIdx,
+    })
+    if (moveShieldFail?.ok) throw new Error(`expected equipping shield while 2H to fail; res=${JSON.stringify(moveShieldFail)}`)
+
+    // Switch back to sword, then re-equip shield.
+    await equipWeapon(page, 'sword')
+    await page.waitForTimeout(80)
+    const inv1h = await getInventory(page)
+    if (inv1h?.equipment?.weapon !== 'sword') throw new Error(`expected weapon=sword; got ${String(inv1h?.equipment?.weapon)}`)
+    const shieldIdx2 = Array.isArray(inv1h?.bag) ? inv1h.bag.findIndex((s) => s?.id === 'shield_basic') : -1
+    if (shieldIdx2 < 0) throw new Error(`expected shield in bag after switching back; bag=${JSON.stringify(inv1h?.bag)}`)
+    const moveShieldOk = await page.evaluate(({ shieldIdx2 }) => globalThis.__dbg?.moveInvItem?.({ type: 'bag', index: shieldIdx2 }, { type: 'equip', slot: 'shield' }), {
+      shieldIdx2,
+    })
+    if (!moveShieldOk?.ok) throw new Error(`expected shield to be equippable with sword; res=${JSON.stringify(moveShieldOk)}`)
+    const invShielded = await getInventory(page)
+    if (invShielded?.equipment?.shield !== 'shield_basic')
+      throw new Error(`expected shield equipped after move; got ${String(invShielded?.equipment?.shield)} inv=${JSON.stringify(invShielded)}`)
+
+    // Slot rules: moving chest to bag should work, but should not be placeable into the helmet slot.
+    const emptyIdx = Array.isArray(invShielded?.bag) ? invShielded.bag.findIndex((s) => !s) : -1
+    if (emptyIdx < 0) throw new Error(`expected at least one empty bag slot; bag=${JSON.stringify(invShielded?.bag)}`)
+    const moveChestOk = await page.evaluate(({ emptyIdx }) => globalThis.__dbg?.moveInvItem?.({ type: 'equip', slot: 'chest' }, { type: 'bag', index: emptyIdx }), {
+      emptyIdx,
+    })
+    if (!moveChestOk?.ok) throw new Error(`expected to unequip chest into bag; res=${JSON.stringify(moveChestOk)}`)
+    const invChestOff = await getInventory(page)
+    if (invChestOff?.equipment?.chest !== null) throw new Error(`expected chest slot to be empty after unequip; inv=${JSON.stringify(invChestOff)}`)
+    const wrongSlotFail = await page.evaluate(({ emptyIdx }) => globalThis.__dbg?.moveInvItem?.({ type: 'bag', index: emptyIdx }, { type: 'equip', slot: 'helmet' }), {
+      emptyIdx,
+    })
+    if (wrongSlotFail?.ok) throw new Error(`expected placing chest into helmet to fail; res=${JSON.stringify(wrongSlotFail)}`)
+    const moveChestBack = await page.evaluate(({ emptyIdx }) => globalThis.__dbg?.moveInvItem?.({ type: 'bag', index: emptyIdx }, { type: 'equip', slot: 'chest' }), {
+      emptyIdx,
+    })
+    if (!moveChestBack?.ok) throw new Error(`expected re-equipping chest to succeed; res=${JSON.stringify(moveChestBack)}`)
+
     // Locked door should not warp without a key.
     await teleportPlayer(page, 480, 352)
     await page.waitForTimeout(120)

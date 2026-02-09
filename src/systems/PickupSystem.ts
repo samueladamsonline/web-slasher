@@ -226,6 +226,7 @@ export class PickupSystem {
       return this.health.heal(amount)
     }
 
-    return false
+    // Everything else goes into the backpack (gear, consumables, etc.).
+    return this.inventory.tryAddToBag(itemId, amount)
   }
 }

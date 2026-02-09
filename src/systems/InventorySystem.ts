@@ -1,54 +1,213 @@
-import type { ItemId } from '../content/items'
-import { ITEMS } from '../content/items'
-import { WEAPONS, type WeaponDef, type WeaponId } from '../content/weapons'
+import { ITEMS, type EquipmentSlot, type ItemId } from '../content/items'
+import { WEAPONS, type WeaponDef, type WeaponHands, type WeaponId } from '../content/weapons'
 
+export type InventoryItemStack = { id: ItemId; qty: number }
+
+export type EquipmentState = Record<EquipmentSlot, ItemId | null>
+
+export type SlotRef = { type: 'equip'; slot: EquipmentSlot } | { type: 'bag'; index: number }
+
+// Inventory snapshot is intentionally permissive to support loading older saves.
 export type InventorySnapshot = {
-  coins: number
-  keys: number
-  weapon: WeaponId | null
-  ownedWeapons: WeaponId[]
+  coins?: number
+  keys?: number
+
+  equipment?: Partial<Record<EquipmentSlot, ItemId | null>>
+  bag?: (InventoryItemStack | null)[]
+
+  // Legacy fields (pre equipment/backpack refactor).
+  weapon?: WeaponId | null
+  ownedWeapons?: WeaponId[]
+}
+
+// Diablo-2-ish backpack size (simple 1x1 items for now).
+const BAG_COLS = 15
+const BAG_ROWS = 10
+const BAG_SIZE = BAG_COLS * BAG_ROWS
+
+function clampInt(v: unknown, def = 0) {
+  return typeof v === 'number' && Number.isFinite(v) ? Math.floor(v) : def
+}
+
+function isItemId(v: unknown): v is ItemId {
+  return typeof v === 'string' && v in ITEMS
+}
+
+function isEquipmentSlot(v: unknown): v is EquipmentSlot {
+  return v === 'helmet' || v === 'chest' || v === 'gloves' || v === 'boots' || v === 'weapon' || v === 'shield'
+}
+
+function cloneEquipment(e: EquipmentState) {
+  return { helmet: e.helmet, chest: e.chest, gloves: e.gloves, boots: e.boots, weapon: e.weapon, shield: e.shield } satisfies EquipmentState
+}
+
+function cloneBag(bag: (InventoryItemStack | null)[]) {
+  return bag.map((s) => (s ? { id: s.id, qty: s.qty } : null))
+}
+
+function getWeaponHands(itemId: ItemId | null): WeaponHands | 0 {
+  if (!itemId) return 0
+  const def = ITEMS[itemId]
+  if (def.kind !== 'equipment') return 0
+  if (def.equip?.slot !== 'weapon') return 0
+  const wid = def.equip.weaponId
+  const wd = WEAPONS[wid]
+  return wd?.hands ?? 0
 }
 
 export class InventorySystem {
   private coins = 0
   private keys = 0
-  private weapon: WeaponId | null = 'sword'
-  private ownedWeapons = new Set<WeaponId>(['sword', 'greatsword'])
+
+  private equipment: EquipmentState = {
+    helmet: 'helmet_basic',
+    chest: 'chest_basic',
+    gloves: 'gloves_basic',
+    boots: 'boots_basic',
+    weapon: 'sword',
+    shield: 'shield_basic',
+  }
+
+  private bag: (InventoryItemStack | null)[] = Array.from({ length: BAG_SIZE }, () => null)
+
   private onChanged?: () => void
 
   constructor(opts?: { onChanged?: () => void }) {
     this.onChanged = opts?.onChanged
+    // Default loadout: give the player a 2H sword to experiment with.
+    this.bag[0] = { id: 'greatsword', qty: 1 }
   }
 
   setOnChanged(cb: (() => void) | undefined) {
     this.onChanged = cb
   }
 
+  getBagCols() {
+    return BAG_COLS
+  }
+
+  getBagRows() {
+    return BAG_ROWS
+  }
+
+  getBagSize() {
+    return BAG_SIZE
+  }
+
   reset() {
     this.coins = 0
     this.keys = 0
-    this.ownedWeapons = new Set<WeaponId>(['sword', 'greatsword'])
-    this.weapon = 'sword'
+
+    this.equipment = {
+      helmet: 'helmet_basic',
+      chest: 'chest_basic',
+      gloves: 'gloves_basic',
+      boots: 'boots_basic',
+      weapon: 'sword',
+      shield: 'shield_basic',
+    }
+
+    this.bag = Array.from({ length: BAG_SIZE }, () => null)
+    this.bag[0] = { id: 'greatsword', qty: 1 }
+
     this.onChanged?.()
   }
 
   load(snapshot: InventorySnapshot | null | undefined) {
-    const coins = typeof snapshot?.coins === 'number' && Number.isFinite(snapshot.coins) ? Math.max(0, Math.floor(snapshot.coins)) : 0
-    const keys = typeof snapshot?.keys === 'number' && Number.isFinite(snapshot.keys) ? Math.max(0, Math.floor(snapshot.keys)) : 0
-    const ownedRaw = Array.isArray(snapshot?.ownedWeapons) ? snapshot!.ownedWeapons : []
-    const owned = new Set<WeaponId>()
-    for (const w of ownedRaw) if (typeof w === 'string' && w in WEAPONS) owned.add(w as WeaponId)
-    if (owned.size === 0) owned.add('sword')
+    const coins = Math.max(0, clampInt(snapshot?.coins, 0))
+    const keys = Math.max(0, clampInt(snapshot?.keys, 0))
 
-    const weaponRaw = snapshot?.weapon
-    const weapon = typeof weaponRaw === 'string' && owned.has(weaponRaw as WeaponId) ? (weaponRaw as WeaponId) : (owned.has('sword') ? 'sword' : null)
+    // Start from default equipment, then apply save overrides.
+    let equipment: EquipmentState = {
+      helmet: 'helmet_basic',
+      chest: 'chest_basic',
+      gloves: 'gloves_basic',
+      boots: 'boots_basic',
+      weapon: 'sword',
+      shield: 'shield_basic',
+    }
+
+    // Bag defaults to an empty grid.
+    let bag: (InventoryItemStack | null)[] = Array.from({ length: BAG_SIZE }, () => null)
+
+    const eqRaw = snapshot?.equipment
+    if (eqRaw && typeof eqRaw === 'object') {
+      for (const [k, v] of Object.entries(eqRaw as any)) {
+        if (!isEquipmentSlot(k)) continue
+        if (v === null) {
+          equipment[k] = null
+          continue
+        }
+        if (!isItemId(v)) continue
+        const def = ITEMS[v]
+        if (def.kind !== 'equipment') continue
+        if (!def.equip) continue
+        if (def.equip.slot !== k) continue
+        equipment[k] = v
+      }
+    } else {
+      // Legacy migration: weapon + ownedWeapons.
+      const weaponRaw = snapshot?.weapon
+      const weapon = typeof weaponRaw === 'string' && weaponRaw in WEAPONS ? (weaponRaw as WeaponId) : 'sword'
+      equipment.weapon = weapon
+      // If the legacy save had a 2H weapon, don't auto-add a shield.
+      if (WEAPONS[weapon]?.hands === 2) equipment.shield = null
+
+      const ownedRaw = Array.isArray(snapshot?.ownedWeapons) ? snapshot!.ownedWeapons : []
+      const owned = new Set<WeaponId>()
+      for (const w of ownedRaw) if (typeof w === 'string' && w in WEAPONS) owned.add(w as WeaponId)
+      owned.add(weapon)
+
+      // Put any non-equipped owned weapons into the bag.
+      let bi = 0
+      for (const w of owned) {
+        if (w === weapon) continue
+        if (bi >= bag.length) break
+        bag[bi++] = { id: w, qty: 1 }
+      }
+    }
+
+    const bagRaw = snapshot?.bag
+    if (Array.isArray(bagRaw)) {
+      const next: (InventoryItemStack | null)[] = Array.from({ length: BAG_SIZE }, () => null)
+      for (let i = 0; i < Math.min(bagRaw.length, BAG_SIZE); i++) {
+        const v = bagRaw[i] as any
+        if (!v) continue
+        if (!isItemId(v.id)) continue
+        const qty = Math.max(1, clampInt(v.qty, 1))
+        // Backpack items do not stack; if an old save has qty>1, spill into empty slots.
+        if (!next[i]) next[i] = { id: v.id, qty: 1 }
+        let remaining = qty - 1
+        while (remaining > 0) {
+          const empty = next.findIndex((s) => !s)
+          if (empty < 0) break
+          next[empty] = { id: v.id, qty: 1 }
+          remaining--
+        }
+      }
+      bag = next
+    }
+
+    const normalized = InventorySystem.normalize({ equipment, bag })
+    if (normalized.ok) {
+      equipment = normalized.equipment
+      bag = normalized.bag
+    }
 
     this.coins = coins
     this.keys = keys
-    this.ownedWeapons = owned
-    this.weapon = weapon
-
+    this.equipment = equipment
+    this.bag = bag
     this.onChanged?.()
+  }
+
+  snapshot(): Required<Pick<InventorySnapshot, 'coins' | 'keys' | 'equipment' | 'bag'>> {
+    return {
+      coins: this.coins,
+      keys: this.keys,
+      equipment: { ...this.equipment },
+      bag: cloneBag(this.bag),
+    }
   }
 
   getCoins() {
@@ -57,38 +216,6 @@ export class InventorySystem {
 
   getKeys() {
     return this.keys
-  }
-
-  getWeapon() {
-    return this.weapon
-  }
-
-  getWeaponDef(): WeaponDef | null {
-    const id = this.weapon
-    return id ? WEAPONS[id] : null
-  }
-
-  hasWeapon(id: WeaponId) {
-    return this.ownedWeapons.has(id)
-  }
-
-  addWeapon(id: WeaponId) {
-    if (this.ownedWeapons.has(id)) return
-    this.ownedWeapons.add(id)
-    if (!this.weapon) this.weapon = id
-    this.onChanged?.()
-  }
-
-  equipWeapon(id: WeaponId) {
-    if (!this.ownedWeapons.has(id)) return false
-    if (this.weapon === id) return true
-    this.weapon = id
-    this.onChanged?.()
-    return true
-  }
-
-  snapshot(): InventorySnapshot {
-    return { coins: this.coins, keys: this.keys, weapon: this.weapon, ownedWeapons: [...this.ownedWeapons] }
   }
 
   addItem(id: ItemId, amount = 1) {
@@ -103,7 +230,7 @@ export class InventorySystem {
 
     if (this.coins !== beforeCoins || this.keys !== beforeKeys) this.onChanged?.()
 
-    // Hearts are immediate-use pickups handled by PickupSystem (not stored).
+    // Hearts are immediate-use pickups handled by PickupSystem.
   }
 
   tryConsumeKey(amount = 1) {
@@ -114,21 +241,159 @@ export class InventorySystem {
     return true
   }
 
-  getInventoryLines() {
-    const lines: string[] = []
+  getEquipment(slot: EquipmentSlot) {
+    return this.equipment[slot]
+  }
 
-    lines.push('I: Close')
-    lines.push('')
-    lines.push('Equipment')
-    const wd = this.getWeaponDef()
-    const weaponLabel = wd ? `${wd.name} (DMG ${wd.damage}, CD ${wd.cooldownMs}ms)` : '(none)'
-    lines.push(`- Weapon: ${weaponLabel}`)
-    lines.push('  1: Sword   2: Greatsword')
-    lines.push('')
-    lines.push('Items')
-    lines.push(`- ${ITEMS.coin.name}: ${this.coins}`)
-    lines.push(`- ${ITEMS.key.name}: ${this.keys}`)
+  getEquipmentState(): EquipmentState {
+    return cloneEquipment(this.equipment)
+  }
 
-    return lines
+  getBagItem(index: number): InventoryItemStack | null {
+    if (!Number.isInteger(index) || index < 0 || index >= this.bag.length) return null
+    const s = this.bag[index]
+    return s ? { id: s.id, qty: s.qty } : null
+  }
+
+  getBag(): (InventoryItemStack | null)[] {
+    return cloneBag(this.bag)
+  }
+
+  getEquippedWeaponId(): WeaponId | null {
+    const id = this.equipment.weapon
+    if (!id) return null
+    const def = ITEMS[id]
+    if (def.kind !== 'equipment') return null
+    if (def.equip?.slot !== 'weapon') return null
+    return def.equip.weaponId
+  }
+
+  getWeaponDef(): WeaponDef | null {
+    const wid = this.getEquippedWeaponId()
+    return wid ? WEAPONS[wid] : null
+  }
+
+  equipWeapon(wid: WeaponId) {
+    // If already equipped, nothing to do.
+    const current = this.getEquippedWeaponId()
+    if (current === wid) return true
+
+    // Find the item in the bag; weapons are represented as items with the same ids.
+    const targetItemId = wid as unknown as ItemId
+    const idx = this.bag.findIndex((s) => s?.id === targetItemId)
+    if (idx < 0) return false
+
+    const res = this.moveItem({ type: 'bag', index: idx }, { type: 'equip', slot: 'weapon' })
+    return res.ok
+  }
+
+  tryAddToBag(itemId: ItemId, amount = 1) {
+    const n = Math.max(0, Math.floor(amount))
+    if (n <= 0) return true
+
+    const nextBag = cloneBag(this.bag)
+
+    // Backpack items do not stack. Each unit consumes one slot.
+    for (let k = 0; k < n; k++) {
+      const empty = nextBag.findIndex((s) => !s)
+      if (empty < 0) return false
+      nextBag[empty] = { id: itemId, qty: 1 }
+    }
+    this.bag = nextBag
+    this.onChanged?.()
+    return true
+  }
+
+  moveItem(from: SlotRef, to: SlotRef): { ok: boolean; error?: string } {
+    const a = this.getSlotStack(from)
+    if (!a) return { ok: false, error: 'empty' }
+    const b = this.getSlotStack(to)
+
+    if (from.type === 'equip' && to.type === 'equip') {
+      // Swapping between different equipment slots is confusing and can easily be invalid.
+      // Force the user to drag through the bag for clarity.
+      if (from.slot !== to.slot) return { ok: false, error: 'equip-swap' }
+      return { ok: true }
+    }
+
+    // Validate the two-way swap.
+    const tmpEquip = cloneEquipment(this.equipment)
+    const tmpBag = cloneBag(this.bag)
+
+    const canPlaceA = InventorySystem.canPlace({ equipment: tmpEquip, bag: tmpBag }, to, a)
+    if (!canPlaceA.ok) return canPlaceA
+    if (b) {
+      const canPlaceB = InventorySystem.canPlace({ equipment: tmpEquip, bag: tmpBag }, from, b)
+      if (!canPlaceB.ok) return canPlaceB
+    }
+
+    InventorySystem.setSlotStack({ equipment: tmpEquip, bag: tmpBag }, from, b)
+    InventorySystem.setSlotStack({ equipment: tmpEquip, bag: tmpBag }, to, a)
+
+    const normalized = InventorySystem.normalize({ equipment: tmpEquip, bag: tmpBag })
+    if (!normalized.ok) return { ok: false, error: normalized.error }
+
+    this.equipment = normalized.equipment
+    this.bag = normalized.bag
+    this.onChanged?.()
+    return { ok: true }
+  }
+
+  private getSlotStack(ref: SlotRef): InventoryItemStack | null {
+    if (ref.type === 'bag') {
+      return this.getBagItem(ref.index)
+    }
+    const id = this.getEquipment(ref.slot)
+    return id ? { id, qty: 1 } : null
+  }
+
+  private static setSlotStack(state: { equipment: EquipmentState; bag: (InventoryItemStack | null)[] }, ref: SlotRef, stack: InventoryItemStack | null) {
+    if (ref.type === 'bag') {
+      if (ref.index < 0 || ref.index >= state.bag.length) return
+      state.bag[ref.index] = stack ? { id: stack.id, qty: stack.qty } : null
+      return
+    }
+    state.equipment[ref.slot] = stack ? stack.id : null
+  }
+
+  private static canPlace(
+    state: { equipment: EquipmentState; bag: (InventoryItemStack | null)[] },
+    dest: SlotRef,
+    stack: InventoryItemStack,
+  ): { ok: boolean; error?: string } {
+    if (dest.type === 'bag') {
+      if (!Number.isInteger(dest.index) || dest.index < 0 || dest.index >= state.bag.length) return { ok: false, error: 'bad-slot' }
+      if (stack.qty !== 1) return { ok: false, error: 'no-stacks' }
+      return { ok: true }
+    }
+
+    if (stack.qty !== 1) return { ok: false, error: 'bad-equip-stack' }
+    const def = ITEMS[stack.id]
+    if (def.kind !== 'equipment' || !def.equip) return { ok: false, error: 'not-equipment' }
+    if (def.equip.slot !== dest.slot) return { ok: false, error: 'wrong-slot' }
+
+    // If trying to equip a shield while a 2H weapon is equipped, block it.
+    if (dest.slot === 'shield') {
+      const hands = getWeaponHands(state.equipment.weapon)
+      if (hands === 2) return { ok: false, error: '2h-blocks-shield' }
+    }
+
+    return { ok: true }
+  }
+
+  private static normalize(state: { equipment: EquipmentState; bag: (InventoryItemStack | null)[] }): { ok: true; equipment: EquipmentState; bag: (InventoryItemStack | null)[] } | { ok: false; error: string } {
+    const equipment = cloneEquipment(state.equipment)
+    const bag = cloneBag(state.bag)
+
+    // Enforce: 2H weapon => no shield equipped.
+    const hands = getWeaponHands(equipment.weapon)
+    if (hands === 2 && equipment.shield) {
+      const empty = bag.findIndex((s) => !s)
+      if (empty < 0) return { ok: false, error: 'no-bag-space-for-shield' }
+      bag[empty] = { id: equipment.shield, qty: 1 }
+      equipment.shield = null
+    }
+
+    return { ok: true, equipment, bag }
   }
 }
