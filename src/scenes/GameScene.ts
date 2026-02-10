@@ -22,6 +22,7 @@ import { MinimapUI } from '../ui/MinimapUI'
 import { OverlayUI } from '../ui/OverlayUI'
 import { InventoryUI } from '../ui/InventoryUI'
 import { SpellSlotUI } from '../ui/SpellSlotUI'
+import { SpellbookUI } from '../ui/SpellbookUI'
 import { WorldState } from '../game/WorldState'
 
 export class GameScene extends Phaser.Scene {
@@ -52,6 +53,7 @@ export class GameScene extends Phaser.Scene {
   private overlay!: OverlayUI
   private inventoryUI!: InventoryUI
   private spellSlotUI!: SpellSlotUI
+  private spellbookUI!: SpellbookUI
   private heroGear?: HeroGear
 
   private startMenu = true
@@ -64,7 +66,7 @@ export class GameScene extends Phaser.Scene {
   private startToken = 0
 
   private paused = false
-  private pauseMode: 'pause' | 'inventory' | 'map' = 'pause'
+  private pauseMode: 'pause' | 'inventory' | 'map' | 'spellbook' = 'pause'
   private gameOver = false
   private dialoguePaused = false
   private checkpoint: { mapKey: 'overworld' | 'cave'; spawnName: string } = { mapKey: 'overworld', spawnName: 'player_spawn' }
@@ -117,6 +119,8 @@ export class GameScene extends Phaser.Scene {
     this.inventory = new InventorySystem()
     this.heroGear = new HeroGear(this, this.hero, this.inventory)
     this.inventoryUI = new InventoryUI(this, this.inventory)
+    this.spellbookUI = new SpellbookUI(this, this.inventory)
+    this.spellbookUI.hide()
     this.save = new SaveSystem({
       inventory: this.inventory,
       world: this.world,
@@ -127,6 +131,7 @@ export class GameScene extends Phaser.Scene {
     this.inventory.setOnChanged(() => {
       this.save.requestSave()
       if (this.inventoryUI?.isVisible?.()) this.inventoryUI.refresh()
+      if (this.spellbookUI?.isVisible?.()) this.spellbookUI.refresh()
       const stats = this.inventory.getPlayerStats()
       this.health?.setMaxHp?.(this.baseMaxHp + stats.maxHpBonus)
       this.spellSlotUI?.setSpell?.(stats.selectedSpell)
@@ -222,6 +227,7 @@ export class GameScene extends Phaser.Scene {
     this.minimap?.destroy?.()
     this.inventoryUI?.destroy?.()
     this.spellSlotUI?.destroy?.()
+    this.spellbookUI?.destroy?.()
     this.mapNameUI?.destroy?.()
     this.dialogueUI?.destroy?.()
     this.promptUI?.destroy?.()
@@ -284,20 +290,32 @@ export class GameScene extends Phaser.Scene {
       this.refreshDbg()
     }
 
-    if (this.controls.justPressed('weapon1')) {
-      if (this.inventory.equipWeapon('sword')) {
-        this.refreshDbg()
-      }
-    }
-    if (this.controls.justPressed('weapon2')) {
-      if (this.inventory.equipWeapon('greatsword')) {
-        this.refreshDbg()
-      }
+    if (this.controls.justPressed('spellbook')) {
+      if (this.paused && this.pauseMode === 'spellbook') this.setPaused(false)
+      else this.setPaused(true, 'spellbook')
+      this.refreshDbg()
     }
 
-    if (this.paused) return
+    if (this.paused) {
+      if (this.pauseMode === 'spellbook') {
+        if (this.controls.justPressed('spell1')) this.spellbookUI?.onHotkeyPressed?.(0)
+        if (this.controls.justPressed('spell2')) this.spellbookUI?.onHotkeyPressed?.(1)
+        if (this.controls.justPressed('spell3')) this.spellbookUI?.onHotkeyPressed?.(2)
+        if (this.controls.justPressed('spell4')) this.spellbookUI?.onHotkeyPressed?.(3)
+        if (this.controls.justPressed('spell5')) this.spellbookUI?.onHotkeyPressed?.(4)
+      }
+      return
+    }
 
     const { vx, vy } = this.controls.getMoveAxes()
+
+    // Spell hotkeys: pressing 1-5 selects the spell assigned to that slot.
+    if (this.controls.justPressed('spell1')) this.inventory.selectSpellHotkey(0)
+    if (this.controls.justPressed('spell2')) this.inventory.selectSpellHotkey(1)
+    if (this.controls.justPressed('spell3')) this.inventory.selectSpellHotkey(2)
+    if (this.controls.justPressed('spell4')) this.inventory.selectSpellHotkey(3)
+    if (this.controls.justPressed('spell5')) this.inventory.selectSpellHotkey(4)
+
     const stats = this.inventory.getPlayerStats()
     if (!stats.selectedSpell) this.debugCastQueuedDir = null
     const weapon = stats.weapon
@@ -450,7 +468,7 @@ export class GameScene extends Phaser.Scene {
     if (mk && typeof sn === 'string' && sn) this.checkpoint = { mapKey: mk, spawnName: sn }
   }
 
-  private setPaused(paused: boolean, mode: 'pause' | 'inventory' | 'map' = this.pauseMode) {
+  private setPaused(paused: boolean, mode: 'pause' | 'inventory' | 'map' | 'spellbook' = this.pauseMode) {
     if (this.paused === paused && this.pauseMode === mode) return
     const wasPaused = this.paused
     this.paused = paused
@@ -468,6 +486,7 @@ export class GameScene extends Phaser.Scene {
       this.minimap?.setMapVisible?.(false)
       this.inventoryUI?.hide?.()
       this.spellSlotUI?.setVisible?.(false)
+      this.spellbookUI?.hide?.()
 
       if (this.pauseMode === 'map') {
         this.overlay.hide()
@@ -475,10 +494,13 @@ export class GameScene extends Phaser.Scene {
       } else if (this.pauseMode === 'inventory') {
         this.overlay.hide()
         this.inventoryUI?.show?.()
+      } else if (this.pauseMode === 'spellbook') {
+        this.overlay.hide()
+        this.spellbookUI?.show?.()
       } else {
         this.minimap?.setMapVisible?.(false)
         this.inventoryUI?.hide?.()
-        this.overlay.showPause(['ESC: Resume', 'I: Inventory', 'M: Map'])
+        this.overlay.showPause(['ESC: Resume', 'I: Inventory', 'F: Spellbook', 'M: Map'])
       }
     } else {
       // Dialogue may have paused the world separately.
@@ -491,6 +513,7 @@ export class GameScene extends Phaser.Scene {
       this.minimap?.setMiniVisible?.(true)
       this.inventoryUI?.hide?.()
       this.spellSlotUI?.setVisible?.(true)
+      this.spellbookUI?.hide?.()
     }
   }
 
@@ -525,6 +548,7 @@ export class GameScene extends Phaser.Scene {
     this.anims.pauseAll()
     this.inventoryUI?.hide?.()
     this.spellSlotUI?.setVisible?.(false)
+    this.spellbookUI?.hide?.()
     this.overlay.showGameOver(['Press ENTER to respawn at last checkpoint.'])
   }
 
@@ -575,6 +599,7 @@ export class GameScene extends Phaser.Scene {
     this.minimap?.setMapVisible?.(false)
     this.inventoryUI?.hide?.()
     this.spellSlotUI?.setVisible?.(false)
+    this.spellbookUI?.hide?.()
 
     const lines: string[] = []
     if (this.startBusy) {
@@ -596,7 +621,7 @@ export class GameScene extends Phaser.Scene {
       lines.push('ENTER: New Game')
     }
     lines.push('')
-    lines.push('WASD: Move   SPACE: Attack   ARROWS: Cast   E: Interact   I: Inventory   M: Map')
+    lines.push('WASD: Move   SPACE: Attack   ARROWS: Cast   F: Spellbook   E: Interact   I: Inventory   M: Map')
     this.overlay.showStart(lines)
     this.refreshDbg()
   }
@@ -654,6 +679,7 @@ export class GameScene extends Phaser.Scene {
     this.minimap?.setMapVisible?.(false)
     this.minimap?.setMiniVisible?.(true)
     this.spellSlotUI?.setVisible?.(true)
+    this.spellbookUI?.hide?.()
 
     // Load while paused, then resume.
     this.hero.setVelocity(0, 0)

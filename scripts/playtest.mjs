@@ -693,46 +693,51 @@ try {
     if (!hasSwiftBoots) throw new Error(`expected starter bag to include boots_swift; bag=${JSON.stringify(inv0.bag)}`)
     const hasQuickGloves = inv0.bag.some((s) => s?.id === 'gloves_quick')
     if (!hasQuickGloves) throw new Error(`expected starter bag to include gloves_quick; bag=${JSON.stringify(inv0.bag)}`)
-    const hasHeartyChest = inv0.bag.some((s) => s?.id === 'chest_hearty')
-    if (!hasHeartyChest) throw new Error(`expected starter bag to include chest_hearty; bag=${JSON.stringify(inv0.bag)}`)
-    const hasPyroHelm = inv0.bag.some((s) => s?.id === 'helmet_pyro')
-    if (!hasPyroHelm) throw new Error(`expected starter bag to include helmet_pyro; bag=${JSON.stringify(inv0.bag)}`)
-
-	    // Spells sanity: starter helmet grants no spells; stash helmet grants Fireball (Lv1).
+	    const hasHeartyChest = inv0.bag.some((s) => s?.id === 'chest_hearty')
+	    if (!hasHeartyChest) throw new Error(`expected starter bag to include chest_hearty; bag=${JSON.stringify(inv0.bag)}`)
+	    const hasPyroHelm = inv0.bag.some((s) => s?.id === 'helmet_pyro')
+	    if (!hasPyroHelm) throw new Error(`expected starter bag to include helmet_pyro; bag=${JSON.stringify(inv0.bag)}`)
+	    const hasFrostGloves = inv0.bag.some((s) => s?.id === 'gloves_frost')
+	    if (!hasFrostGloves) throw new Error(`expected starter bag to include gloves_frost; bag=${JSON.stringify(inv0.bag)}`)
+	
+	    // Spells sanity: gear grants spellbook entries, player binds spells to hotkeys in the spellbook overlay (F),
+	    // then selects them with 1-5 and casts with arrow keys.
 	    try {
 	      const idxPyro = inv0.bag.findIndex((s) => s?.id === 'helmet_pyro')
-	      if (idxPyro < 0) throw new Error(`expected to find helmet_pyro in bag; bag=${JSON.stringify(inv0.bag)}`)
-
-      // Freeze enemies so casting is deterministic and does not affect later AI tests.
-      await page.evaluate(() => {
-        const scene = globalThis.__dbg?.player?.scene
-        const group = scene?.mapRuntime?.enemies
-        const kids = group?.getChildren?.() ?? []
-        for (const e of kids) {
-          if (!e?.stats) continue
-          if (typeof e.__testPrevSpeed !== 'number') e.__testPrevSpeed = e.stats.moveSpeed
-          e.stats.moveSpeed = 0
-          if (typeof e.setVelocity === 'function') e.setVelocity(0, 0)
-        }
-      })
-
-      try {
-        const open = await findOpenTileSample(page, 4)
-        if (!open) throw new Error('could not find open tiles for fireball test')
-
-        const spacing = open.tile * 4
-        await teleportEnemy(page, 'slime', open.x + spacing, open.y)
-        await teleportPlayer(page, open.x - spacing, open.y)
-        await page.waitForTimeout(120)
-
+	      const idxFrost = inv0.bag.findIndex((s) => s?.id === 'gloves_frost')
+	      if (idxPyro < 0 || idxFrost < 0)
+	        throw new Error(`expected to find helmet_pyro + gloves_frost in bag; idxPyro=${idxPyro} idxFrost=${idxFrost} bag=${JSON.stringify(inv0.bag)}`)
+	
+	      // Freeze enemies so casting is deterministic and does not affect later AI tests.
+	      await page.evaluate(() => {
+	        const scene = globalThis.__dbg?.player?.scene
+	        const group = scene?.mapRuntime?.enemies
+	        const kids = group?.getChildren?.() ?? []
+	        for (const e of kids) {
+	          if (!e?.stats) continue
+	          if (typeof e.__testPrevSpeed !== 'number') e.__testPrevSpeed = e.stats.moveSpeed
+	          e.stats.moveSpeed = 0
+	          if (typeof e.setVelocity === 'function') e.setVelocity(0, 0)
+	        }
+	      })
+	
+	      try {
+	        const open = await findOpenTileSample(page, 4)
+	        if (!open) throw new Error('could not find open tiles for spells test')
+	
+	        const spacing = open.tile * 4
+	        await teleportEnemy(page, 'slime', open.x + spacing, open.y)
+	        await teleportPlayer(page, open.x - spacing, open.y)
+	        await page.waitForTimeout(120)
+	
 	        await page.evaluate(() => {
 	          const p = globalThis.__dbg?.player
 	          if (!p) return
 	          if (typeof globalThis.__dbg?.setFacing === 'function') globalThis.__dbg.setFacing('right')
 	          if (typeof p.setVelocity === 'function') p.setVelocity(0, 0)
 	        })
-
-	        // HUD sanity: with starter helmet, selected spell should be empty.
+	
+	        // HUD sanity: no spell selected at the start.
 	        const hud0 = await page.evaluate(() => {
 	          const scene = globalThis.__dbg?.player?.scene
 	          const ui = scene?.spellSlotUI
@@ -741,107 +746,227 @@ try {
 	        if (hud0?.visible !== true) throw new Error(`expected spell HUD visible in-game; hud0=${JSON.stringify(hud0)}`)
 	        if (!String(hud0?.name ?? '').toLowerCase().includes('no spell'))
 	          throw new Error(`expected spell HUD to show no spell initially; hud0=${JSON.stringify(hud0)}`)
-
-	        // Baseline: with starter helmet, casting should do nothing.
+	
+	        // Baseline: with no selected spell, casting should do nothing.
 	        const cast0 = await getLastCast(page)
 	        const prevCastAt0 = typeof cast0?.at === 'number' ? cast0.at : 0
 	        const enemiesB0 = await getEnemies(page)
-        const slimeB0 = Array.isArray(enemiesB0) ? enemiesB0.find((e) => e.kind === 'slime') : null
+	        const slimeB0 = Array.isArray(enemiesB0) ? enemiesB0.find((e) => e.kind === 'slime') : null
 	        const slimeHp0 = slimeB0?.hp
 	        if (typeof slimeHp0 !== 'number') throw new Error(`expected numeric slime hp before baseline cast; enemies=${JSON.stringify(enemiesB0)}`)
-
-	        // Arrow keys cast the currently selected spell (twin-stick-ish keyboard controls).
+	
 	        await page.keyboard.down('ArrowRight')
 	        await page.waitForTimeout(80)
 	        await page.keyboard.up('ArrowRight')
 	        await page.waitForTimeout(200)
 	        const cast1 = await getLastCast(page)
 	        const castAt1 = typeof cast1?.at === 'number' ? cast1.at : 0
-	        if (castAt1 > prevCastAt0) throw new Error(`expected no cast with starter helmet; cast0=${JSON.stringify(cast0)} cast1=${JSON.stringify(cast1)}`)
-
-        const enemiesB1 = await getEnemies(page)
-        const slimeB1 = Array.isArray(enemiesB1) ? enemiesB1.find((e) => e.kind === 'slime') : null
-        const slimeHp1 = slimeB1?.hp
-        if (slimeHp1 !== slimeHp0) throw new Error(`expected baseline cast to not damage slime; hp0=${slimeHp0} hp1=${slimeHp1}`)
-
-        // Equip ember hood (grants Fireball Lv1).
-        const equipHelmOk = await page.evaluate(({ idxPyro }) => globalThis.__dbg?.moveInvItem?.({ type: 'bag', index: idxPyro }, { type: 'equip', slot: 'helmet' }), {
-          idxPyro,
-	        })
+	        if (castAt1 > prevCastAt0) throw new Error(`expected no cast with no selected spell; cast0=${JSON.stringify(cast0)} cast1=${JSON.stringify(cast1)}`)
+	
+	        // Equip ember hood (Fireball Lv1) and frost gloves (Ice Blast Lv2). Selected spell should remain empty.
+	        const equipHelmOk = await page.evaluate(({ idxPyro }) => globalThis.__dbg?.moveInvItem?.({ type: 'bag', index: idxPyro }, { type: 'equip', slot: 'helmet' }), { idxPyro })
 	        if (!equipHelmOk?.ok) throw new Error(`expected equipping helmet_pyro to succeed; res=${JSON.stringify(equipHelmOk)}`)
-	        await page.waitForTimeout(120)
-
+	        const equipGlovesOk = await page.evaluate(({ idxFrost }) => globalThis.__dbg?.moveInvItem?.({ type: 'bag', index: idxFrost }, { type: 'equip', slot: 'gloves' }), {
+	          idxFrost,
+	        })
+	        if (!equipGlovesOk?.ok) throw new Error(`expected equipping gloves_frost to succeed; res=${JSON.stringify(equipGlovesOk)}`)
+	        await page.waitForTimeout(160)
+	
 	        const hud1 = await page.evaluate(() => {
 	          const scene = globalThis.__dbg?.player?.scene
 	          const ui = scene?.spellSlotUI
 	          return { visible: ui?.container?.visible ?? null, name: ui?.name?.text ?? null }
 	        })
-	        if (hud1?.visible !== true) throw new Error(`expected spell HUD visible after equipping helm; hud1=${JSON.stringify(hud1)}`)
-	        if (!String(hud1?.name ?? '').toLowerCase().includes('fireball'))
-	          throw new Error(`expected spell HUD to show Fireball after equipping helm; hud1=${JSON.stringify(hud1)}`)
-
-	        // Cast Fireball and verify it deals 1 damage and stops on hit.
+	        if (!String(hud1?.name ?? '').toLowerCase().includes('no spell'))
+	          throw new Error(`expected spell HUD to remain empty until a hotkey is selected; hud1=${JSON.stringify(hud1)}`)
+	
+	        // Open spellbook overlay (F) and bind hotkeys by hovering a spell and pressing 1-5.
+	        await page.keyboard.down('f')
+	        await page.waitForTimeout(80)
+	        await page.keyboard.up('f')
+	        await page.waitForTimeout(220)
+	
+	        const stBook = await getGameState(page)
+	        if (!stBook?.paused || stBook?.pauseMode !== 'spellbook') throw new Error(`expected spellbook pause; state=${JSON.stringify(stBook)}`)
+	
+	        const uiPts = await page.evaluate(() => {
+	          const scene = globalThis.__dbg?.player?.scene
+	          const ui = scene?.spellbookUI
+	          const slots = ui?.spellSlots ?? []
+	          const fb = slots.find((s) => s?.spell?.id === 'fireball')?.bg
+	          const ice = slots.find((s) => s?.spell?.id === 'iceblast')?.bg
+	          const canvas = document.querySelector('canvas')
+	          const rect = canvas?.getBoundingClientRect?.()
+	          if (!fb || !ice || !rect) return null
+	          const sx = rect.width / 960
+	          const sy = rect.height / 600
+	          const toPage = (p) => ({ x: rect.left + p.x * sx, y: rect.top + p.y * sy })
+	          return { fireball: toPage({ x: fb.x, y: fb.y }), iceblast: toPage({ x: ice.x, y: ice.y }) }
+	        })
+	        if (!uiPts) throw new Error('could not read spellbook UI slot positions')
+	
+	        // Bind Fireball to 1.
+	        await page.mouse.move(uiPts.fireball.x, uiPts.fireball.y)
+	        await page.waitForTimeout(80)
+	        await page.keyboard.down('1')
+	        await page.waitForTimeout(60)
+	        await page.keyboard.up('1')
+	        await page.waitForTimeout(120)
+	
+	        const fbIndicator = await page.evaluate(() => {
+	          const scene = globalThis.__dbg?.player?.scene
+	          const slots = scene?.spellbookUI?.spellSlots ?? []
+	          const slot = slots.find((s) => s?.spell?.id === 'fireball') ?? null
+	          return { text: slot?.hotkey?.text ?? null, visible: slot?.hotkey?.visible ?? null }
+	        })
+	        if (!(fbIndicator?.visible === true && String(fbIndicator.text ?? '') === '1'))
+	          throw new Error(`expected Fireball hotkey indicator=1; got ${JSON.stringify(fbIndicator)}`)
+	
+	        // Bind Ice Blast to 2.
+	        await page.mouse.move(uiPts.iceblast.x, uiPts.iceblast.y)
+	        await page.waitForTimeout(80)
+	        await page.keyboard.down('2')
+	        await page.waitForTimeout(60)
+	        await page.keyboard.up('2')
+	        await page.waitForTimeout(120)
+	
+	        const iceIndicator = await page.evaluate(() => {
+	          const scene = globalThis.__dbg?.player?.scene
+	          const slots = scene?.spellbookUI?.spellSlots ?? []
+	          const slot = slots.find((s) => s?.spell?.id === 'iceblast') ?? null
+	          return { text: slot?.hotkey?.text ?? null, visible: slot?.hotkey?.visible ?? null }
+	        })
+	        if (!(iceIndicator?.visible === true && String(iceIndicator.text ?? '') === '2'))
+	          throw new Error(`expected Ice Blast hotkey indicator=2; got ${JSON.stringify(iceIndicator)}`)
+	
+	        // Close spellbook overlay.
+	        await page.keyboard.down('f')
+	        await page.waitForTimeout(80)
+	        await page.keyboard.up('f')
+	        await page.waitForTimeout(220)
+	        const stBook2 = await getGameState(page)
+	        if (stBook2?.paused) throw new Error(`expected spellbook close; state=${JSON.stringify(stBook2)}`)
+	
+	        const invHot = await getInventory(page)
+	        if (invHot?.spellHotkeys?.[0] !== 'fireball') throw new Error(`expected hotkey 1=fireball; inv=${JSON.stringify(invHot)}`)
+	        if (invHot?.spellHotkeys?.[1] !== 'iceblast') throw new Error(`expected hotkey 2=iceblast; inv=${JSON.stringify(invHot)}`)
+	
+	        // Select Ice Blast (2) and cast; should deal 2 damage.
+	        await page.keyboard.down('2')
+	        await page.waitForTimeout(40)
+	        await page.keyboard.up('2')
+	        await page.waitForTimeout(80)
+	
+	        const hudIce = await page.evaluate(() => {
+	          const scene = globalThis.__dbg?.player?.scene
+	          const ui = scene?.spellSlotUI
+	          return { name: ui?.name?.text ?? null }
+	        })
+	        if (!String(hudIce?.name ?? '').toLowerCase().includes('ice')) throw new Error(`expected HUD to show ice blast; hud=${JSON.stringify(hudIce)}`)
+	
+	        const enemiesC0 = await getEnemies(page)
+	        const slimeC0 = Array.isArray(enemiesC0) ? enemiesC0.find((e) => e.kind === 'slime') : null
+	        const slimeHpC0 = slimeC0?.hp
+	        if (typeof slimeHpC0 !== 'number') throw new Error(`expected numeric slime hp before ice blast; enemies=${JSON.stringify(enemiesC0)}`)
+	
 	        const cast2 = await getLastCast(page)
 	        const prevCastAt2 = typeof cast2?.at === 'number' ? cast2.at : 0
-
-        const enemiesC0 = await getEnemies(page)
-        const slimeC0 = Array.isArray(enemiesC0) ? enemiesC0.find((e) => e.kind === 'slime') : null
-	        const slimeHpC0 = slimeC0?.hp
-	        if (typeof slimeHpC0 !== 'number') throw new Error(`expected numeric slime hp before fireball; enemies=${JSON.stringify(enemiesC0)}`)
-
 	        await page.keyboard.down('ArrowRight')
 	        await page.waitForTimeout(80)
 	        await page.keyboard.up('ArrowRight')
-
-	        // Wait for cast to register.
+	
 	        let castAt3 = null
 	        const startedCastWait = Date.now()
-        while (Date.now() - startedCastWait < 1200) {
-          const c = await getLastCast(page)
-          const at = typeof c?.at === 'number' ? c.at : null
-          if (typeof at === 'number' && at > prevCastAt2) {
-            castAt3 = at
-            break
-          }
-          await page.waitForTimeout(20)
-        }
-        if (!(typeof castAt3 === 'number')) throw new Error('timed out waiting for fireball cast')
-
-        // Wait for slime HP to drop by exactly 1.
-        let slimeHpC1 = slimeHpC0
-        const startedHpWait = Date.now()
-        while (Date.now() - startedHpWait < 2200) {
-          const enemies = await getEnemies(page)
-          const s = Array.isArray(enemies) ? enemies.find((e) => e.kind === 'slime') : null
-          const hp = s?.hp
-          if (typeof hp === 'number') slimeHpC1 = hp
-          if (typeof hp === 'number' && hp < slimeHpC0) break
-          await page.waitForTimeout(40)
-        }
-        if (slimeHpC1 !== slimeHpC0 - 1) throw new Error(`expected fireball damage=1; before=${slimeHpC0} after=${slimeHpC1}`)
-
-        // Projectile should be gone shortly after hit.
-        await page.waitForTimeout(180)
-        const projs = await getProjectiles(page)
-        const count = Array.isArray(projs) ? projs.length : null
-        if (!(count === 0)) throw new Error(`expected fireball projectile to despawn on hit; projectiles=${JSON.stringify(projs)}`)
-      } finally {
-        // Restore enemy speeds.
-        await page.evaluate(() => {
-          const scene = globalThis.__dbg?.player?.scene
-          const group = scene?.mapRuntime?.enemies
-          const kids = group?.getChildren?.() ?? []
-          for (const e of kids) {
-            if (!e?.stats) continue
-            const prev = e.__testPrevSpeed
-            if (typeof prev === 'number') e.stats.moveSpeed = prev
-            delete e.__testPrevSpeed
-          }
-        })
-      }
-    } catch (e) {
-      errors.push(`expected spellcasting (fireball); ${String(e?.message ?? e)}`)
-    }
+	        while (Date.now() - startedCastWait < 1400) {
+	          const c = await getLastCast(page)
+	          const at = typeof c?.at === 'number' ? c.at : null
+	          if (typeof at === 'number' && at > prevCastAt2) {
+	            castAt3 = at
+	            break
+	          }
+	          await page.waitForTimeout(20)
+	        }
+	        if (!(typeof castAt3 === 'number')) throw new Error('timed out waiting for ice blast cast')
+	
+	        let slimeHpC1 = slimeHpC0
+	        const startedHpWait = Date.now()
+	        while (Date.now() - startedHpWait < 2400) {
+	          const enemies = await getEnemies(page)
+	          const s = Array.isArray(enemies) ? enemies.find((e) => e.kind === 'slime') : null
+	          const hp = s?.hp
+	          if (typeof hp === 'number') slimeHpC1 = hp
+	          if (typeof hp === 'number' && hp < slimeHpC0) break
+	          await page.waitForTimeout(40)
+	        }
+	        if (slimeHpC1 !== slimeHpC0 - 2) throw new Error(`expected ice blast damage=2; before=${slimeHpC0} after=${slimeHpC1}`)
+	
+	        // Select Fireball (1) and cast; should deal 1 damage.
+	        await page.keyboard.down('1')
+	        await page.waitForTimeout(40)
+	        await page.keyboard.up('1')
+	        await page.waitForTimeout(80)
+	
+	        const hudFb = await page.evaluate(() => {
+	          const scene = globalThis.__dbg?.player?.scene
+	          const ui = scene?.spellSlotUI
+	          return { name: ui?.name?.text ?? null }
+	        })
+	        if (!String(hudFb?.name ?? '').toLowerCase().includes('fireball')) throw new Error(`expected HUD to show fireball; hud=${JSON.stringify(hudFb)}`)
+	
+	        const cast4 = await getLastCast(page)
+	        const prevCastAt4 = typeof cast4?.at === 'number' ? cast4.at : 0
+	        await page.keyboard.down('ArrowRight')
+	        await page.waitForTimeout(80)
+	        await page.keyboard.up('ArrowRight')
+	
+	        let castAt5 = null
+	        const startedCastWait2 = Date.now()
+	        while (Date.now() - startedCastWait2 < 1400) {
+	          const c = await getLastCast(page)
+	          const at = typeof c?.at === 'number' ? c.at : null
+	          if (typeof at === 'number' && at > prevCastAt4) {
+	            castAt5 = at
+	            break
+	          }
+	          await page.waitForTimeout(20)
+	        }
+	        if (!(typeof castAt5 === 'number')) throw new Error('timed out waiting for fireball cast')
+	
+	        // Wait for slime HP to drop by exactly 1.
+	        let slimeHpF1 = slimeHpC1
+	        const startedHpWait2 = Date.now()
+	        while (Date.now() - startedHpWait2 < 2400) {
+	          const enemies = await getEnemies(page)
+	          const s = Array.isArray(enemies) ? enemies.find((e) => e.kind === 'slime') : null
+	          const hp = s?.hp
+	          if (typeof hp === 'number') slimeHpF1 = hp
+	          if (typeof hp === 'number' && hp < slimeHpC1) break
+	          await page.waitForTimeout(40)
+	        }
+	        if (slimeHpF1 !== slimeHpC1 - 1) throw new Error(`expected fireball damage=1; before=${slimeHpC1} after=${slimeHpF1}`)
+	
+	        // Projectile should be gone shortly after hit.
+	        await page.waitForTimeout(200)
+	        const projs = await getProjectiles(page)
+	        const count = Array.isArray(projs) ? projs.length : null
+	        if (!(count === 0)) throw new Error(`expected spell projectile to despawn on hit; projectiles=${JSON.stringify(projs)}`)
+	      } finally {
+	        // Restore enemy speeds.
+	        await page.evaluate(() => {
+	          const scene = globalThis.__dbg?.player?.scene
+	          const group = scene?.mapRuntime?.enemies
+	          const kids = group?.getChildren?.() ?? []
+	          for (const e of kids) {
+	            if (!e?.stats) continue
+	            const prev = e.__testPrevSpeed
+	            if (typeof prev === 'number') e.stats.moveSpeed = prev
+	            delete e.__testPrevSpeed
+	          }
+	        })
+	      }
+	    } catch (e) {
+	      errors.push(`expected spell hotkeys + spellbook overlay; ${String(e?.message ?? e)}`)
+	    }
 
     // 2H weapon rule: equipping greatsword should unequip shield, and shield should not be equippable while 2H is active.
     await equipWeapon(page, 'greatsword')

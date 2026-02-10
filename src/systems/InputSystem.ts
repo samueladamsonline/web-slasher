@@ -1,6 +1,19 @@
 import * as Phaser from 'phaser'
 
-export type ActionId = 'confirm' | 'newGame' | 'pause' | 'inventory' | 'map' | 'attack' | 'interact' | 'weapon1' | 'weapon2'
+export type ActionId =
+  | 'confirm'
+  | 'newGame'
+  | 'pause'
+  | 'inventory'
+  | 'map'
+  | 'spellbook'
+  | 'attack'
+  | 'interact'
+  | 'spell1'
+  | 'spell2'
+  | 'spell3'
+  | 'spell4'
+  | 'spell5'
 
 export class InputSystem {
   private cursors: Phaser.Types.Input.Keyboard.CursorKeys
@@ -32,10 +45,14 @@ export class InputSystem {
       pause: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC),
       inventory: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I),
       map: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M),
+      spellbook: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F),
       attack: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE),
       interact: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E),
-      weapon1: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ONE),
-      weapon2: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TWO),
+      spell1: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ONE),
+      spell2: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TWO),
+      spell3: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.THREE),
+      spell4: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.FOUR),
+      spell5: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.FIVE),
     }
   }
 

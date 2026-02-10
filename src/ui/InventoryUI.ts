@@ -119,6 +119,22 @@ export class InventoryUI {
       g.strokeRoundedRect(17, 14, 8, 10, 4)
     })
 
+    ensure('item-gloves-frost', (g) => {
+      // Gloves with a cool "ice" highlight.
+      g.fillStyle(0x6b4c2a, 1)
+      g.fillRoundedRect(7, 14, 8, 10, 4)
+      g.fillRoundedRect(17, 14, 8, 10, 4)
+      g.fillStyle(0x3b2a1a, 1)
+      g.fillRoundedRect(8, 17, 6, 5, 3)
+      g.fillRoundedRect(18, 17, 6, 5, 3)
+      g.fillStyle(0x76fff8, 0.7)
+      g.fillRoundedRect(9, 15, 4, 2, 1)
+      g.fillRoundedRect(19, 15, 4, 2, 1)
+      g.lineStyle(3, 0x0a0d12, 0.55)
+      g.strokeRoundedRect(7, 14, 8, 10, 4)
+      g.strokeRoundedRect(17, 14, 8, 10, 4)
+    })
+
     ensure('item-boots', (g) => {
       g.fillStyle(0x6b4c2a, 1)
       g.fillRoundedRect(8, 11, 7, 14, 3)
@@ -823,10 +839,11 @@ export class InventoryUI {
         const hp = def.equip.maxHpBonus
         if (typeof hp === 'number' && Number.isFinite(hp) && hp !== 0) lines.push(`Max HP: +${Math.floor(hp)} Hearts`)
 
-        if (def.equip.slot === 'helmet') {
-          const spells = def.equip.spells ?? []
-          if (spells.length) {
-            const formatted = spells
+        const spells = def.equip.spells
+        if (Array.isArray(spells) || def.equip.slot === 'helmet') {
+          const list = Array.isArray(spells) ? spells : []
+          if (list.length) {
+            const formatted = list
               .map((s) => {
                 const spellDef = SPELLS[s.id]
                 const lvl = typeof s.level === 'number' && Number.isFinite(s.level) ? Math.max(1, Math.floor(s.level)) : 1

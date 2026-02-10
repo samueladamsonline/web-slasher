@@ -28,6 +28,7 @@ export type InventorySnapshot = {
   equipment?: Partial<Record<EquipmentSlot, ItemId | null>>
   bag?: (InventoryItemStack | null)[]
   selectedSpell?: SpellGrant | null
+  spellHotkeys?: (SpellId | null)[]
 
   // Legacy fields (pre equipment/backpack refactor).
   weapon?: WeaponId | null
@@ -91,6 +92,7 @@ export class InventorySystem {
   private bag: (InventoryItemStack | null)[] = Array.from({ length: BAG_SIZE }, () => null)
 
   private selectedSpell: SpellGrant | null = null
+  private spellHotkeys: (SpellId | null)[] = [null, null, null, null, null]
 
   private onChanged?: () => void
 
@@ -102,6 +104,7 @@ export class InventorySystem {
     this.bag[2] = { id: 'gloves_quick', qty: 1 }
     this.bag[3] = { id: 'chest_hearty', qty: 1 }
     this.bag[4] = { id: 'helmet_pyro', qty: 1 }
+    this.bag[5] = { id: 'gloves_frost', qty: 1 }
 
     // Starter helmet grants no spells, so selection starts empty.
     this.ensureSelectedSpellValid()
@@ -142,8 +145,10 @@ export class InventorySystem {
     this.bag[2] = { id: 'gloves_quick', qty: 1 }
     this.bag[3] = { id: 'chest_hearty', qty: 1 }
     this.bag[4] = { id: 'helmet_pyro', qty: 1 }
+    this.bag[5] = { id: 'gloves_frost', qty: 1 }
 
     this.selectedSpell = null
+    this.spellHotkeys = [null, null, null, null, null]
     this.ensureSelectedSpellValid()
     this.onChanged?.()
   }
@@ -173,6 +178,21 @@ export class InventorySystem {
       const levelRaw = (selRaw as any).level
       const level = typeof levelRaw === 'number' && Number.isFinite(levelRaw) ? Math.max(1, Math.floor(levelRaw)) : 1
       if (typeof id === 'string' && (id as any) in SPELLS) selectedSpell = { id: id as SpellId, level }
+    }
+
+    let spellHotkeys: (SpellId | null)[] = [null, null, null, null, null]
+    const hkRaw = (snapshot as any)?.spellHotkeys
+    if (Array.isArray(hkRaw)) {
+      const next: (SpellId | null)[] = [null, null, null, null, null]
+      for (let i = 0; i < Math.min(5, hkRaw.length); i++) {
+        const v = hkRaw[i]
+        if (v === null) {
+          next[i] = null
+          continue
+        }
+        if (typeof v === 'string' && (v as any) in SPELLS) next[i] = v as SpellId
+      }
+      spellHotkeys = next
     }
 
     const eqRaw = snapshot?.equipment
@@ -266,6 +286,7 @@ export class InventorySystem {
     this.equipment = equipment
     this.bag = bag
     this.selectedSpell = selectedSpell
+    this.spellHotkeys = spellHotkeys
     this.ensureSelectedSpellValid()
     this.onChanged?.()
   }
@@ -277,6 +298,7 @@ export class InventorySystem {
       equipment: { ...this.equipment },
       bag: cloneBag(this.bag),
       selectedSpell: this.selectedSpell ? { id: this.selectedSpell.id, level: this.selectedSpell.level } : null,
+      spellHotkeys: this.spellHotkeys.slice(0, 5),
     }
   }
 
@@ -350,6 +372,33 @@ export class InventorySystem {
 
   getSelectedSpell(): SpellGrant | null {
     return this.selectedSpell ? { id: this.selectedSpell.id, level: this.selectedSpell.level } : null
+  }
+
+  getSpellHotkeys(): (SpellId | null)[] {
+    return this.spellHotkeys.slice(0, 5)
+  }
+
+  assignSpellHotkey(slotIndex: number, spellId: SpellId) {
+    const idx = Math.max(0, Math.min(4, Math.floor(slotIndex)))
+    if (!(spellId in SPELLS)) return false
+    // Only allow binding spells that are currently available from equipped gear.
+    const book = this.computeSpellbook(this.equipment)
+    if (!book.some((s) => s.id === spellId)) return false
+    const next = this.spellHotkeys.slice(0, 5)
+    for (let i = 0; i < next.length; i++) {
+      if (next[i] === spellId) next[i] = null
+    }
+    next[idx] = spellId
+    this.spellHotkeys = next
+    this.onChanged?.()
+    return true
+  }
+
+  selectSpellHotkey(slotIndex: number) {
+    const idx = Math.max(0, Math.min(4, Math.floor(slotIndex)))
+    const id = this.spellHotkeys[idx]
+    if (!id) return false
+    return this.selectSpell(id)
   }
 
   selectSpell(id: SpellId) {
@@ -535,26 +584,53 @@ export class InventorySystem {
   }
 
   private computeSpellbook(equipment: EquipmentState): SpellGrant[] {
-    const helmId = equipment.helmet
-    const helm = helmId ? ITEMS[helmId] : null
-    const spellsRaw = helm && helm.kind === 'equipment' && helm.equip?.slot === 'helmet' ? (helm.equip.spells ?? []) : []
-    const spells: SpellGrant[] = []
-    for (const s of spellsRaw) {
-      if (!s) continue
-      if (!(s.id in SPELLS)) continue
-      const level = typeof s.level === 'number' && Number.isFinite(s.level) ? Math.max(1, Math.floor(s.level)) : 1
-      spells.push({ id: s.id as SpellId, level })
+    const levels = new Map<SpellId, number>()
+    for (const slot of Object.keys(equipment) as EquipmentSlot[]) {
+      const itemId = equipment[slot]
+      if (!itemId) continue
+      const def = ITEMS[itemId]
+      if (def.kind !== 'equipment') continue
+      const spellsRaw = (def.equip as any)?.spells
+      if (!Array.isArray(spellsRaw) || spellsRaw.length === 0) continue
+      for (const s of spellsRaw) {
+        if (!s) continue
+        const id = (s as any).id
+        if (!(typeof id === 'string' && (id as any) in SPELLS)) continue
+        const levelRaw = (s as any).level
+        const level = typeof levelRaw === 'number' && Number.isFinite(levelRaw) ? Math.max(1, Math.floor(levelRaw)) : 1
+        const prev = levels.get(id as SpellId) ?? 0
+        if (level > prev) levels.set(id as SpellId, level)
+      }
     }
-    return spells
+
+    return Array.from(levels.entries())
+      .map(([id, level]) => ({ id, level }))
+      .sort((a, b) => String(SPELLS[a.id]?.name ?? a.id).localeCompare(String(SPELLS[b.id]?.name ?? b.id)))
   }
 
   private ensureSelectedSpellValid() {
     const book = this.computeSpellbook(this.equipment)
-    let next: SpellGrant | null = null
-    if (book.length) {
-      if (this.selectedSpell) next = book.find((s) => s.id === this.selectedSpell!.id) ?? book[0]!
-      else next = book[0]!
+    const valid = new Map<SpellId, number>()
+    for (const s of book) valid.set(s.id, s.level)
+
+    // Prune hotkeys that point to spells you no longer have.
+    const nextHotkeys = this.spellHotkeys.slice(0, 5).map((id) => (id && valid.has(id) ? id : null))
+    let hotkeysChanged = false
+    for (let i = 0; i < 5; i++) {
+      if (nextHotkeys[i] !== this.spellHotkeys[i]) {
+        hotkeysChanged = true
+        break
+      }
     }
-    if (!sameSpellGrant(this.selectedSpell, next)) this.selectedSpell = next ? { id: next.id, level: next.level } : null
+    if (hotkeysChanged) this.spellHotkeys = nextHotkeys
+
+    // If the selected spell is no longer available, clear it (do not auto-select another).
+    let nextSelected: SpellGrant | null = null
+    if (this.selectedSpell && valid.has(this.selectedSpell.id)) {
+      const lvl = valid.get(this.selectedSpell.id) ?? this.selectedSpell.level
+      nextSelected = { id: this.selectedSpell.id, level: lvl }
+    }
+
+    if (!sameSpellGrant(this.selectedSpell, nextSelected)) this.selectedSpell = nextSelected
   }
 }

@@ -17,6 +17,7 @@ export type ItemId =
   // Early upgraded gear (starter stash).
   | 'boots_swift'
   | 'gloves_quick'
+  | 'gloves_frost'
   | 'chest_hearty'
   // Weapons (also used by combat).
   | WeaponId
@@ -33,7 +34,7 @@ export type EquipmentInfo =
       attackSpeedPct?: number
       // Flat additive hearts to max HP.
       maxHpBonus?: number
-      // Helmets can grant a spell list (id + level).
+      // Equipment can grant spells (id + level) to the player's spellbook.
       spells?: SpellGrant[]
     }
 
@@ -103,6 +104,14 @@ export const ITEMS: Record<ItemId, ItemDef> = {
     texture: 'item-gloves-quick',
     stackable: false,
     equip: { slot: 'gloves', armor: 1, attackSpeedPct: 25 },
+  },
+  gloves_frost: {
+    id: 'gloves_frost',
+    name: 'Frost Gloves',
+    kind: 'equipment',
+    texture: 'item-gloves-frost',
+    stackable: false,
+    equip: { slot: 'gloves', armor: 1, spells: [{ id: 'iceblast', level: 2 }] },
   },
   chest_hearty: {
     id: 'chest_hearty',

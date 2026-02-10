@@ -1,6 +1,6 @@
 import { TILE_SIZE } from '../game/constants'
 
-export type SpellId = 'fireball'
+export type SpellId = 'fireball' | 'iceblast'
 
 export type SpellGrant = { id: SpellId; level: number }
 
@@ -46,6 +46,29 @@ export const SPELLS: Record<SpellId, SpellDef> = {
         // Roughly matches player speed (240 px/s) given TILE_SIZE=16.
         speedTilesPerSec: 15,
         cooldownMs: 450,
+      },
+    },
+  },
+  iceblast: {
+    kind: 'projectile',
+    id: 'iceblast',
+    name: 'Ice Blast',
+    projectileTexture: 'spell-iceblast',
+    iconTexture: 'spell-icon-iceblast',
+    coreColor: 0x76fff8,
+    glowColor: 0x3dd6ff,
+    radius: 6,
+    ttlMs: 2700,
+    levels: {
+      1: {
+        damage: 1,
+        speedTilesPerSec: 13,
+        cooldownMs: 520,
+      },
+      2: {
+        damage: 2,
+        speedTilesPerSec: 13,
+        cooldownMs: 520,
       },
     },
   },
