@@ -698,10 +698,10 @@ try {
     const hasPyroHelm = inv0.bag.some((s) => s?.id === 'helmet_pyro')
     if (!hasPyroHelm) throw new Error(`expected starter bag to include helmet_pyro; bag=${JSON.stringify(inv0.bag)}`)
 
-    // Spells sanity: starter helmet grants no spells; stash helmet grants Fireball (Lv1).
-    try {
-      const idxPyro = inv0.bag.findIndex((s) => s?.id === 'helmet_pyro')
-      if (idxPyro < 0) throw new Error(`expected to find helmet_pyro in bag; bag=${JSON.stringify(inv0.bag)}`)
+	    // Spells sanity: starter helmet grants no spells; stash helmet grants Fireball (Lv1).
+	    try {
+	      const idxPyro = inv0.bag.findIndex((s) => s?.id === 'helmet_pyro')
+	      if (idxPyro < 0) throw new Error(`expected to find helmet_pyro in bag; bag=${JSON.stringify(inv0.bag)}`)
 
       // Freeze enemies so casting is deterministic and does not affect later AI tests.
       await page.evaluate(() => {
@@ -725,26 +725,39 @@ try {
         await teleportPlayer(page, open.x - spacing, open.y)
         await page.waitForTimeout(120)
 
-        await page.evaluate(() => {
-          const p = globalThis.__dbg?.player
-          if (!p) return
-          if (typeof globalThis.__dbg?.setFacing === 'function') globalThis.__dbg.setFacing('right')
-          if (typeof p.setVelocity === 'function') p.setVelocity(0, 0)
-        })
+	        await page.evaluate(() => {
+	          const p = globalThis.__dbg?.player
+	          if (!p) return
+	          if (typeof globalThis.__dbg?.setFacing === 'function') globalThis.__dbg.setFacing('right')
+	          if (typeof p.setVelocity === 'function') p.setVelocity(0, 0)
+	        })
 
-        // Baseline: with starter helmet, casting should do nothing.
-        const cast0 = await getLastCast(page)
-        const prevCastAt0 = typeof cast0?.at === 'number' ? cast0.at : 0
-        const enemiesB0 = await getEnemies(page)
+	        // HUD sanity: with starter helmet, selected spell should be empty.
+	        const hud0 = await page.evaluate(() => {
+	          const scene = globalThis.__dbg?.player?.scene
+	          const ui = scene?.spellSlotUI
+	          return { visible: ui?.container?.visible ?? null, name: ui?.name?.text ?? null }
+	        })
+	        if (hud0?.visible !== true) throw new Error(`expected spell HUD visible in-game; hud0=${JSON.stringify(hud0)}`)
+	        if (!String(hud0?.name ?? '').toLowerCase().includes('no spell'))
+	          throw new Error(`expected spell HUD to show no spell initially; hud0=${JSON.stringify(hud0)}`)
+
+	        // Baseline: with starter helmet, casting should do nothing.
+	        const cast0 = await getLastCast(page)
+	        const prevCastAt0 = typeof cast0?.at === 'number' ? cast0.at : 0
+	        const enemiesB0 = await getEnemies(page)
         const slimeB0 = Array.isArray(enemiesB0) ? enemiesB0.find((e) => e.kind === 'slime') : null
-        const slimeHp0 = slimeB0?.hp
-        if (typeof slimeHp0 !== 'number') throw new Error(`expected numeric slime hp before baseline cast; enemies=${JSON.stringify(enemiesB0)}`)
+	        const slimeHp0 = slimeB0?.hp
+	        if (typeof slimeHp0 !== 'number') throw new Error(`expected numeric slime hp before baseline cast; enemies=${JSON.stringify(enemiesB0)}`)
 
-        await page.evaluate(() => globalThis.__dbg?.tryCast?.())
-        await page.waitForTimeout(700)
-        const cast1 = await getLastCast(page)
-        const castAt1 = typeof cast1?.at === 'number' ? cast1.at : 0
-        if (castAt1 > prevCastAt0) throw new Error(`expected no cast with starter helmet; cast0=${JSON.stringify(cast0)} cast1=${JSON.stringify(cast1)}`)
+	        // Arrow keys cast the currently selected spell (twin-stick-ish keyboard controls).
+	        await page.keyboard.down('ArrowRight')
+	        await page.waitForTimeout(80)
+	        await page.keyboard.up('ArrowRight')
+	        await page.waitForTimeout(200)
+	        const cast1 = await getLastCast(page)
+	        const castAt1 = typeof cast1?.at === 'number' ? cast1.at : 0
+	        if (castAt1 > prevCastAt0) throw new Error(`expected no cast with starter helmet; cast0=${JSON.stringify(cast0)} cast1=${JSON.stringify(cast1)}`)
 
         const enemiesB1 = await getEnemies(page)
         const slimeB1 = Array.isArray(enemiesB1) ? enemiesB1.find((e) => e.kind === 'slime') : null
@@ -754,24 +767,35 @@ try {
         // Equip ember hood (grants Fireball Lv1).
         const equipHelmOk = await page.evaluate(({ idxPyro }) => globalThis.__dbg?.moveInvItem?.({ type: 'bag', index: idxPyro }, { type: 'equip', slot: 'helmet' }), {
           idxPyro,
-        })
-        if (!equipHelmOk?.ok) throw new Error(`expected equipping helmet_pyro to succeed; res=${JSON.stringify(equipHelmOk)}`)
-        await page.waitForTimeout(120)
+	        })
+	        if (!equipHelmOk?.ok) throw new Error(`expected equipping helmet_pyro to succeed; res=${JSON.stringify(equipHelmOk)}`)
+	        await page.waitForTimeout(120)
 
-        // Cast Fireball and verify it deals 1 damage and stops on hit.
-        const cast2 = await getLastCast(page)
-        const prevCastAt2 = typeof cast2?.at === 'number' ? cast2.at : 0
+	        const hud1 = await page.evaluate(() => {
+	          const scene = globalThis.__dbg?.player?.scene
+	          const ui = scene?.spellSlotUI
+	          return { visible: ui?.container?.visible ?? null, name: ui?.name?.text ?? null }
+	        })
+	        if (hud1?.visible !== true) throw new Error(`expected spell HUD visible after equipping helm; hud1=${JSON.stringify(hud1)}`)
+	        if (!String(hud1?.name ?? '').toLowerCase().includes('fireball'))
+	          throw new Error(`expected spell HUD to show Fireball after equipping helm; hud1=${JSON.stringify(hud1)}`)
+
+	        // Cast Fireball and verify it deals 1 damage and stops on hit.
+	        const cast2 = await getLastCast(page)
+	        const prevCastAt2 = typeof cast2?.at === 'number' ? cast2.at : 0
 
         const enemiesC0 = await getEnemies(page)
         const slimeC0 = Array.isArray(enemiesC0) ? enemiesC0.find((e) => e.kind === 'slime') : null
-        const slimeHpC0 = slimeC0?.hp
-        if (typeof slimeHpC0 !== 'number') throw new Error(`expected numeric slime hp before fireball; enemies=${JSON.stringify(enemiesC0)}`)
+	        const slimeHpC0 = slimeC0?.hp
+	        if (typeof slimeHpC0 !== 'number') throw new Error(`expected numeric slime hp before fireball; enemies=${JSON.stringify(enemiesC0)}`)
 
-        await page.evaluate(() => globalThis.__dbg?.tryCast?.())
+	        await page.keyboard.down('ArrowRight')
+	        await page.waitForTimeout(80)
+	        await page.keyboard.up('ArrowRight')
 
-        // Wait for cast to register.
-        let castAt3 = null
-        const startedCastWait = Date.now()
+	        // Wait for cast to register.
+	        let castAt3 = null
+	        const startedCastWait = Date.now()
         while (Date.now() - startedCastWait < 1200) {
           const c = await getLastCast(page)
           const at = typeof c?.at === 'number' ? c.at : null

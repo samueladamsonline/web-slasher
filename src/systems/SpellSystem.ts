@@ -1,5 +1,4 @@
 import * as Phaser from 'phaser'
-import type { Facing } from '../game/types'
 import { SPELLS, resolveSpellLevel, spellSpeedPxPerSec, type SpellGrant, type SpellId } from '../content/spells'
 import { Enemy } from '../entities/Enemy'
 import { SpellProjectile } from '../entities/SpellProjectile'
@@ -29,14 +28,31 @@ export class SpellSystem {
         g.fillStyle(0xffffff, 0.35)
         g.fillCircle(cx - 3, cy - 3, 2.4)
       })
+
+      ensure(
+        def.iconTexture,
+        (g) => {
+          // UI icon: framed tile with the spell's palette.
+          g.fillStyle(0x0b111a, 0.95)
+          g.fillRoundedRect(2, 2, 28, 28, 6)
+          g.lineStyle(3, 0xe0c68a, 0.32)
+          g.strokeRoundedRect(2, 2, 28, 28, 6)
+          g.fillStyle(def.glowColor, 0.32)
+          g.fillCircle(16, 16, 10)
+          g.fillStyle(def.coreColor, 0.92)
+          g.fillCircle(15, 17, 6)
+          g.fillStyle(0xffffff, 0.25)
+          g.fillCircle(13, 13, 2.6)
+        },
+        32,
+      )
     }
   }
 
   private scene: Phaser.Scene
   private caster: Phaser.Physics.Arcade.Sprite
   private getEnemies: () => Phaser.Physics.Arcade.Group | undefined
-  private getFacing: () => Facing
-  private getSpellbook: () => SpellGrant[]
+  private getSelectedSpell: () => SpellGrant | null
   private getCollisionLayer?: () => Phaser.Tilemaps.TilemapLayer | null
 
   private projectiles: Phaser.Physics.Arcade.Group
@@ -51,13 +67,12 @@ export class SpellSystem {
     scene: Phaser.Scene,
     caster: Phaser.Physics.Arcade.Sprite,
     getEnemies: () => Phaser.Physics.Arcade.Group | undefined,
-    opts: { getFacing: () => Facing; getSpellbook: () => SpellGrant[]; getCollisionLayer?: () => Phaser.Tilemaps.TilemapLayer | null },
+    opts: { getSelectedSpell: () => SpellGrant | null; getCollisionLayer?: () => Phaser.Tilemaps.TilemapLayer | null },
   ) {
     this.scene = scene
     this.caster = caster
     this.getEnemies = getEnemies
-    this.getFacing = opts.getFacing
-    this.getSpellbook = opts.getSpellbook
+    this.getSelectedSpell = opts.getSelectedSpell
     this.getCollisionLayer = opts.getCollisionLayer
 
     this.projectiles = this.scene.physics.add.group()
@@ -125,14 +140,14 @@ export class SpellSystem {
       .map((k: any) => ({ spellId: k.spellId, level: k.level, x: k.x, y: k.y }))
   }
 
-  tryCastPrimary(now: number) {
-    const book = this.getSpellbook ? this.getSpellbook() : []
-    const primary = Array.isArray(book) ? book.find((s) => s && typeof s.id === 'string' && s.id in SPELLS) : null
-    if (!primary) return false
-    return this.tryCast(now, primary.id as SpellId, primary.level)
+  tryCastSelected(now: number, dir: { x: number; y: number }) {
+    const selected = this.getSelectedSpell ? this.getSelectedSpell() : null
+    if (!selected) return false
+    if (!(selected.id in SPELLS)) return false
+    return this.tryCast(now, selected.id as SpellId, selected.level, dir)
   }
 
-  tryCast(now: number, spellId: SpellId, level: number) {
+  tryCast(now: number, spellId: SpellId, level: number, dirRaw: { x: number; y: number }) {
     const def = SPELLS[spellId]
     if (!def || def.kind !== 'projectile') return false
 
@@ -142,6 +157,9 @@ export class SpellSystem {
     const until = this.cooldownUntil.get(spellId) ?? -Infinity
     if (now < until) return false
 
+    const dir = normalizeCardinalDir(dirRaw)
+    if (!dir) return false
+
     const cfg = resolved.cfg
     const dmg = Number.isFinite(cfg.damage) ? Math.max(0, Math.floor(cfg.damage)) : 0
     const speed = spellSpeedPxPerSec(cfg.speedTilesPerSec)
@@ -150,8 +168,6 @@ export class SpellSystem {
     const cx = body?.center?.x ?? this.caster.x
     const cy = body?.center?.y ?? this.caster.y
 
-    const facing = this.getFacing()
-    const dir = facingToDir(facing)
     const spawnOff = 12
     const x = cx + dir.x * spawnOff
     const y = cy + dir.y * spawnOff
@@ -210,9 +226,11 @@ export class SpellSystem {
   }
 }
 
-function facingToDir(facing: Facing) {
-  if (facing === 'up') return { x: 0, y: -1 }
-  if (facing === 'down') return { x: 0, y: 1 }
-  if (facing === 'left') return { x: -1, y: 0 }
-  return { x: 1, y: 0 }
+function normalizeCardinalDir(dir: { x: number; y: number } | null | undefined): { x: number; y: number } | null {
+  if (!dir) return null
+  const x = typeof dir.x === 'number' && Number.isFinite(dir.x) ? dir.x : 0
+  const y = typeof dir.y === 'number' && Number.isFinite(dir.y) ? dir.y : 0
+  if (Math.abs(x) < 0.0001 && Math.abs(y) < 0.0001) return null
+  if (Math.abs(x) >= Math.abs(y)) return { x: x < 0 ? -1 : 1, y: 0 }
+  return { x: 0, y: y < 0 ? -1 : 1 }
 }

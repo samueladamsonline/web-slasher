@@ -1,5 +1,5 @@
 import { ITEMS, type EquipmentSlot, type ItemId } from '../content/items'
-import { SPELLS, type SpellGrant } from '../content/spells'
+import { SPELLS, type SpellGrant, type SpellId } from '../content/spells'
 import { WEAPONS, type WeaponDef, type WeaponHands, type WeaponId } from '../content/weapons'
 
 export type InventoryItemStack = { id: ItemId; qty: number }
@@ -15,6 +15,7 @@ export type PlayerStats = {
   attackSpeedMul: number
   maxHpBonus: number
   spells: SpellGrant[]
+  selectedSpell: SpellGrant | null
   weapon: WeaponDef | null
   attackDamage: number
 }
@@ -26,6 +27,7 @@ export type InventorySnapshot = {
 
   equipment?: Partial<Record<EquipmentSlot, ItemId | null>>
   bag?: (InventoryItemStack | null)[]
+  selectedSpell?: SpellGrant | null
 
   // Legacy fields (pre equipment/backpack refactor).
   weapon?: WeaponId | null
@@ -57,6 +59,12 @@ function cloneBag(bag: (InventoryItemStack | null)[]) {
   return bag.map((s) => (s ? { id: s.id, qty: s.qty } : null))
 }
 
+function sameSpellGrant(a: SpellGrant | null, b: SpellGrant | null) {
+  if (!a && !b) return true
+  if (!a || !b) return false
+  return a.id === b.id && a.level === b.level
+}
+
 function getWeaponHands(itemId: ItemId | null): WeaponHands | 0 {
   if (!itemId) return 0
   const def = ITEMS[itemId]
@@ -82,6 +90,8 @@ export class InventorySystem {
 
   private bag: (InventoryItemStack | null)[] = Array.from({ length: BAG_SIZE }, () => null)
 
+  private selectedSpell: SpellGrant | null = null
+
   private onChanged?: () => void
 
   constructor(opts?: { onChanged?: () => void }) {
@@ -92,6 +102,9 @@ export class InventorySystem {
     this.bag[2] = { id: 'gloves_quick', qty: 1 }
     this.bag[3] = { id: 'chest_hearty', qty: 1 }
     this.bag[4] = { id: 'helmet_pyro', qty: 1 }
+
+    // Starter helmet grants no spells, so selection starts empty.
+    this.ensureSelectedSpellValid()
   }
 
   setOnChanged(cb: (() => void) | undefined) {
@@ -130,6 +143,8 @@ export class InventorySystem {
     this.bag[3] = { id: 'chest_hearty', qty: 1 }
     this.bag[4] = { id: 'helmet_pyro', qty: 1 }
 
+    this.selectedSpell = null
+    this.ensureSelectedSpellValid()
     this.onChanged?.()
   }
 
@@ -149,6 +164,16 @@ export class InventorySystem {
 
     // Bag defaults to an empty grid.
     let bag: (InventoryItemStack | null)[] = Array.from({ length: BAG_SIZE }, () => null)
+
+    // Selected spell is optional; validate it after computing the spellbook from equipment.
+    let selectedSpell: SpellGrant | null = null
+    const selRaw = (snapshot as any)?.selectedSpell
+    if (selRaw && typeof selRaw === 'object') {
+      const id = (selRaw as any).id
+      const levelRaw = (selRaw as any).level
+      const level = typeof levelRaw === 'number' && Number.isFinite(levelRaw) ? Math.max(1, Math.floor(levelRaw)) : 1
+      if (typeof id === 'string' && (id as any) in SPELLS) selectedSpell = { id: id as SpellId, level }
+    }
 
     const eqRaw = snapshot?.equipment
     if (eqRaw && typeof eqRaw === 'object') {
@@ -240,15 +265,18 @@ export class InventorySystem {
     this.keys = keys
     this.equipment = equipment
     this.bag = bag
+    this.selectedSpell = selectedSpell
+    this.ensureSelectedSpellValid()
     this.onChanged?.()
   }
 
-  snapshot(): Required<Pick<InventorySnapshot, 'coins' | 'keys' | 'equipment' | 'bag'>> {
+  snapshot(): InventorySnapshot {
     return {
       coins: this.coins,
       keys: this.keys,
       equipment: { ...this.equipment },
       bag: cloneBag(this.bag),
+      selectedSpell: this.selectedSpell ? { id: this.selectedSpell.id, level: this.selectedSpell.level } : null,
     }
   }
 
@@ -320,6 +348,20 @@ export class InventorySystem {
     return weapon ? weapon.damage : 0
   }
 
+  getSelectedSpell(): SpellGrant | null {
+    return this.selectedSpell ? { id: this.selectedSpell.id, level: this.selectedSpell.level } : null
+  }
+
+  selectSpell(id: SpellId) {
+    const book = this.computeSpellbook(this.equipment)
+    const target = book.find((s) => s.id === id) ?? null
+    if (!target) return false
+    if (sameSpellGrant(this.selectedSpell, target)) return true
+    this.selectedSpell = { id: target.id, level: target.level }
+    this.onChanged?.()
+    return true
+  }
+
   getPlayerStats(): PlayerStats {
     const weapon = this.getWeaponDef()
 
@@ -347,16 +389,7 @@ export class InventorySystem {
         ? Math.max(0, Math.floor(chest.equip.maxHpBonus))
         : 0
 
-    const helmId = this.getEquipment('helmet')
-    const helm = helmId ? ITEMS[helmId] : null
-    const spellsRaw = helm && helm.kind === 'equipment' && helm.equip?.slot === 'helmet' ? (helm.equip.spells ?? []) : []
-    const spells: SpellGrant[] = []
-    for (const s of spellsRaw) {
-      if (!s) continue
-      if (!(s.id in SPELLS)) continue
-      const level = typeof s.level === 'number' && Number.isFinite(s.level) ? Math.max(1, Math.floor(s.level)) : 1
-      spells.push({ id: s.id, level })
-    }
+    const spells = this.computeSpellbook(this.equipment)
 
     const msMulRaw = 1 + (Number.isFinite(moveSpeedPct) ? moveSpeedPct / 100 : 0)
     const asMulRaw = 1 + (Number.isFinite(attackSpeedPct) ? attackSpeedPct / 100 : 0)
@@ -370,6 +403,7 @@ export class InventorySystem {
       attackSpeedMul,
       maxHpBonus,
       spells,
+      selectedSpell: this.selectedSpell ? { id: this.selectedSpell.id, level: this.selectedSpell.level } : null,
       weapon,
       attackDamage: weapon ? weapon.damage : 0,
     }
@@ -437,6 +471,7 @@ export class InventorySystem {
 
     this.equipment = normalized.equipment
     this.bag = normalized.bag
+    this.ensureSelectedSpellValid()
     this.onChanged?.()
     return { ok: true }
   }
@@ -497,5 +532,29 @@ export class InventorySystem {
     }
 
     return { ok: true, equipment, bag }
+  }
+
+  private computeSpellbook(equipment: EquipmentState): SpellGrant[] {
+    const helmId = equipment.helmet
+    const helm = helmId ? ITEMS[helmId] : null
+    const spellsRaw = helm && helm.kind === 'equipment' && helm.equip?.slot === 'helmet' ? (helm.equip.spells ?? []) : []
+    const spells: SpellGrant[] = []
+    for (const s of spellsRaw) {
+      if (!s) continue
+      if (!(s.id in SPELLS)) continue
+      const level = typeof s.level === 'number' && Number.isFinite(s.level) ? Math.max(1, Math.floor(s.level)) : 1
+      spells.push({ id: s.id as SpellId, level })
+    }
+    return spells
+  }
+
+  private ensureSelectedSpellValid() {
+    const book = this.computeSpellbook(this.equipment)
+    let next: SpellGrant | null = null
+    if (book.length) {
+      if (this.selectedSpell) next = book.find((s) => s.id === this.selectedSpell!.id) ?? book[0]!
+      else next = book[0]!
+    }
+    if (!sameSpellGrant(this.selectedSpell, next)) this.selectedSpell = next ? { id: next.id, level: next.level } : null
   }
 }

@@ -21,6 +21,7 @@ import { MapNameUI } from '../ui/MapNameUI'
 import { MinimapUI } from '../ui/MinimapUI'
 import { OverlayUI } from '../ui/OverlayUI'
 import { InventoryUI } from '../ui/InventoryUI'
+import { SpellSlotUI } from '../ui/SpellSlotUI'
 import { WorldState } from '../game/WorldState'
 
 export class GameScene extends Phaser.Scene {
@@ -29,7 +30,7 @@ export class GameScene extends Phaser.Scene {
   private speed = 240
   private baseMaxHp = 5
   private debugAttackQueued = false
-  private debugCastQueued = false
+  private debugCastQueuedDir: { x: number; y: number } | null = null
   private cleanedUp = false
 
   private mapRuntime!: MapRuntime
@@ -50,6 +51,7 @@ export class GameScene extends Phaser.Scene {
   private minimap!: MinimapUI
   private overlay!: OverlayUI
   private inventoryUI!: InventoryUI
+  private spellSlotUI!: SpellSlotUI
   private heroGear?: HeroGear
 
   private startMenu = true
@@ -86,6 +88,7 @@ export class GameScene extends Phaser.Scene {
     InteractionSystem.preload(this)
     InventoryUI.preload(this)
     SoundSystem.preload(this)
+    SpellSlotUI.preload(this)
   }
 
   create() {
@@ -107,6 +110,8 @@ export class GameScene extends Phaser.Scene {
     this.overlay = new OverlayUI(this)
     this.dialogueUI = new DialogueUI(this)
     this.promptUI = new InteractPromptUI(this)
+    this.spellSlotUI = new SpellSlotUI(this)
+    this.spellSlotUI.setVisible(false)
 
     this.world = new WorldState()
     this.inventory = new InventorySystem()
@@ -124,6 +129,7 @@ export class GameScene extends Phaser.Scene {
       if (this.inventoryUI?.isVisible?.()) this.inventoryUI.refresh()
       const stats = this.inventory.getPlayerStats()
       this.health?.setMaxHp?.(this.baseMaxHp + stats.maxHpBonus)
+      this.spellSlotUI?.setSpell?.(stats.selectedSpell)
       // Update visible gear immediately even while the world is paused (inventory open).
       this.heroGear?.update(false)
     })
@@ -151,10 +157,10 @@ export class GameScene extends Phaser.Scene {
       hasLineOfSight: (fromX, fromY, toX, toY) => this.mapRuntime.hasLineOfSight(fromX, fromY, toX, toY),
     })
     this.spells = new SpellSystem(this, this.hero, () => this.mapRuntime.enemies, {
-      getFacing: () => this.hero.getFacing(),
-      getSpellbook: () => this.inventory.getPlayerStats().spells,
+      getSelectedSpell: () => this.inventory.getSelectedSpell(),
       getCollisionLayer: () => this.mapRuntime.getCollisionLayer(),
     })
+    this.spellSlotUI.setSpell(this.inventory.getPlayerStats().selectedSpell)
 
     this.health = new PlayerHealthSystem(this, this.hero, () => this.mapRuntime.enemies)
     this.health.onMapChanged()
@@ -215,6 +221,7 @@ export class GameScene extends Phaser.Scene {
 
     this.minimap?.destroy?.()
     this.inventoryUI?.destroy?.()
+    this.spellSlotUI?.destroy?.()
     this.mapNameUI?.destroy?.()
     this.dialogueUI?.destroy?.()
     this.promptUI?.destroy?.()
@@ -292,11 +299,10 @@ export class GameScene extends Phaser.Scene {
 
     const { vx, vy } = this.controls.getMoveAxes()
     const stats = this.inventory.getPlayerStats()
+    if (!stats.selectedSpell) this.debugCastQueuedDir = null
     const weapon = stats.weapon
     const attackJustPressed = this.controls.justPressed('attack')
-    const castJustPressed = this.controls.justPressed('cast')
     const attackPressedRaw = attackJustPressed || this.debugAttackQueued
-    const castPressedRaw = castJustPressed || this.debugCastQueued
     const attackPressed = !!weapon && attackPressedRaw && this.combat.canAttack()
     const scaledAttackTiming = weapon
       ? {
@@ -318,11 +324,15 @@ export class GameScene extends Phaser.Scene {
     if (res.didStrike) this.combat.tryAttack()
 
     // Spells are independent of melee weapons; helmets grant the spellbook.
-    if (castPressedRaw) {
-      const didCast = this.spells?.tryCastPrimary?.(this.time.now) ?? false
+    const castDir = this.controls.getCastDir()
+    const castDirRaw = castDir ?? this.debugCastQueuedDir
+    if (castDirRaw && stats.selectedSpell) {
+      const didCast = this.spells?.tryCastSelected?.(this.time.now, castDirRaw) ?? false
       // Keep debug casts queued until they actually cast, so tests don't flake on cooldown timing.
-      if (!stats.spells?.length) this.debugCastQueued = false
-      else if (didCast) this.debugCastQueued = false
+      if (!castDir && this.debugCastQueuedDir) {
+        if (!stats.selectedSpell) this.debugCastQueuedDir = null
+        else if (didCast) this.debugCastQueuedDir = null
+      }
     }
 
     this.health.setMaxHp(this.baseMaxHp + stats.maxHpBonus)
@@ -375,8 +385,9 @@ export class GameScene extends Phaser.Scene {
       },
       getLastCast: () => this.spells?.getDebug?.() ?? { at: 0, spellId: null, level: 0, hits: 0 },
       getProjectiles: () => this.spells?.getProjectilesDebug?.() ?? [],
-      tryCast: () => {
-        this.debugCastQueued = true
+      tryCast: (dir: string = 'right') => {
+        const d = dir === 'left' ? { x: -1, y: 0 } : dir === 'up' ? { x: 0, y: -1 } : dir === 'down' ? { x: 0, y: 1 } : { x: 1, y: 0 }
+        this.debugCastQueuedDir = d
       },
       tryInteract: () => this.interactions?.tryInteract?.(),
       equipWeapon: (id: string) => {
@@ -456,6 +467,7 @@ export class GameScene extends Phaser.Scene {
       this.minimap?.setMiniVisible?.(false)
       this.minimap?.setMapVisible?.(false)
       this.inventoryUI?.hide?.()
+      this.spellSlotUI?.setVisible?.(false)
 
       if (this.pauseMode === 'map') {
         this.overlay.hide()
@@ -478,6 +490,7 @@ export class GameScene extends Phaser.Scene {
       this.minimap?.setMapVisible?.(false)
       this.minimap?.setMiniVisible?.(true)
       this.inventoryUI?.hide?.()
+      this.spellSlotUI?.setVisible?.(true)
     }
   }
 
@@ -511,6 +524,7 @@ export class GameScene extends Phaser.Scene {
     this.physics.world.pause()
     this.anims.pauseAll()
     this.inventoryUI?.hide?.()
+    this.spellSlotUI?.setVisible?.(false)
     this.overlay.showGameOver(['Press ENTER to respawn at last checkpoint.'])
   }
 
@@ -560,6 +574,7 @@ export class GameScene extends Phaser.Scene {
     this.minimap?.setMiniVisible?.(false)
     this.minimap?.setMapVisible?.(false)
     this.inventoryUI?.hide?.()
+    this.spellSlotUI?.setVisible?.(false)
 
     const lines: string[] = []
     if (this.startBusy) {
@@ -581,7 +596,7 @@ export class GameScene extends Phaser.Scene {
       lines.push('ENTER: New Game')
     }
     lines.push('')
-    lines.push('WASD: Move   SPACE: Attack   F: Cast   E: Interact   I: Inventory   M: Map')
+    lines.push('WASD: Move   SPACE: Attack   ARROWS: Cast   E: Interact   I: Inventory   M: Map')
     this.overlay.showStart(lines)
     this.refreshDbg()
   }
@@ -638,6 +653,7 @@ export class GameScene extends Phaser.Scene {
     this.overlay.hide()
     this.minimap?.setMapVisible?.(false)
     this.minimap?.setMiniVisible?.(true)
+    this.spellSlotUI?.setVisible?.(true)
 
     // Load while paused, then resume.
     this.hero.setVelocity(0, 0)

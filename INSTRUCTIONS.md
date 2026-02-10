@@ -15,6 +15,7 @@ Web-Slasher is a Phaser-based 2D top-down action RPG. The game is organized arou
 - `EnemyAISystem`: finite state machines per enemy. Bats use path-following when line-of-sight is blocked; slimes wander/leash.
 - `CombatSystem`: handles player attacks and hit detection.
 - `SpellSystem`: handles spell casting and projectile spells (data-driven from `src/content/spells.ts`).
+- `SpellSlotUI`: bottom-right HUD slot showing the currently selected spell (icon + name).
 - `PlayerHealthSystem`: damage, invulnerability, and health UI. Touch damage uses overlap + swept-circle check for tunneling.
 - `InventorySystem`: equipment, weapons, and bag.
 - `InventoryUI`: Diablo-2-ish overlay for EQUIPPED + STASH; the right-side Details panel shows hovered item stats, and shows aggregated equipped stats when nothing is hovered.
@@ -31,9 +32,9 @@ Player power is derived from equipment via `InventorySystem.getPlayerStats()`:
 - Boots: `moveSpeedPct` (multiplies base movement speed).
 - Gloves: `attackSpeedPct` (scales weapon windup/active/recovery and combat lock time).
 - Chest: `maxHpBonus` (adds flat hearts to max HP; if the player was full, stays full on increases).
-- Helmet: grants a spellbook (spell id + level). Casting uses this list (foundation for future hotbar / multiple spells).
+- Helmet: grants a spellbook (spell id + level). The player has a single `selectedSpell` at a time (auto-picks the first available when gear changes).
 
-`GameScene` is the integration point: it applies `moveSpeedMul`, scaled attack timings, and max HP to the hero/combat/health systems, and wires `SpellSystem` to cast from the equipped helmet spellbook (default key: `F`).
+`GameScene` is the integration point: it applies `moveSpeedMul`, scaled attack timings, and max HP to the hero/combat/health systems, and wires `SpellSystem` to cast the selected spell in the direction of the arrow keys (WASD = move, arrows = cast). `SpellSlotUI` shows the selected spell in the bottom-right HUD.
 
 ## Pathfinding
 `src/game/pathfinding.ts` provides A* on the collision grid. `MapRuntime.findPath` wraps this and returns tile + world-point paths. `EnemyAISystem` uses `findPath` and `hasLineOfSight` to chase around walls rather than pushing into them.

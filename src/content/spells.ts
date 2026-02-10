@@ -16,6 +16,7 @@ export type ProjectileSpellDef = {
   id: SpellId
   name: string
   projectileTexture: string
+  iconTexture: string
   // Simple palette for generated placeholder textures.
   coreColor: number
   glowColor: number
@@ -34,6 +35,7 @@ export const SPELLS: Record<SpellId, SpellDef> = {
     id: 'fireball',
     name: 'Fireball',
     projectileTexture: 'spell-fireball',
+    iconTexture: 'spell-icon-fireball',
     coreColor: 0xff6b3d,
     glowColor: 0xffd96b,
     radius: 5,
