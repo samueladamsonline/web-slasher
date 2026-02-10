@@ -14,7 +14,7 @@ Web-Slasher is a Phaser-based 2D top-down action RPG. The game is organized arou
 ## Core Systems
 - `EnemyAISystem`: finite state machines per enemy. Bats use path-following when line-of-sight is blocked; slimes wander/leash.
 - `CombatSystem`: handles player attacks and hit detection.
-- `SpellSystem`: handles spell casting and projectile spells (data-driven from `src/content/spells.ts`).
+- `SpellSystem`: handles spell casting and projectile spells (data-driven from `src/content/spells.ts`), including optional on-hit effects (for example slow).
 - `SpellbookUI`: overlay for viewing available spells and assigning spell hotkeys.
 - `SpellSlotUI`: bottom-right HUD slot showing the currently selected spell (icon + name).
 - `PlayerHealthSystem`: damage, invulnerability, and health UI. Touch damage uses overlap + swept-circle check for tunneling.
@@ -34,6 +34,8 @@ Player power is derived from equipment via `InventorySystem.getPlayerStats()`:
 - Gloves: `attackSpeedPct` (scales weapon windup/active/recovery and combat lock time).
 - Chest: `maxHpBonus` (adds flat hearts to max HP; if the player was full, stays full on increases).
 - Spells: equipped items can grant spells (`spell id + level`). The player has a single `selectedSpell` at a time.
+  - If multiple equipped items grant the same spell at different levels, the highest level wins.
+  - Spells may define on-hit effects (for example, Ice Bolt slows enemies) in `src/content/spells.ts`.
 
 Spell input and selection:
 - `1-5`: select the spell assigned to that hotkey (spells only; no weapon quick-equip).

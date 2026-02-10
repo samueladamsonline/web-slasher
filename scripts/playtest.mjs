@@ -699,14 +699,17 @@ try {
 	    if (!hasPyroHelm) throw new Error(`expected starter bag to include helmet_pyro; bag=${JSON.stringify(inv0.bag)}`)
 	    const hasFrostGloves = inv0.bag.some((s) => s?.id === 'gloves_frost')
 	    if (!hasFrostGloves) throw new Error(`expected starter bag to include gloves_frost; bag=${JSON.stringify(inv0.bag)}`)
+	    const hasFrostShield = inv0.bag.some((s) => s?.id === 'shield_frost')
+	    if (!hasFrostShield) throw new Error(`expected starter bag to include shield_frost; bag=${JSON.stringify(inv0.bag)}`)
 	
 	    // Spells sanity: gear grants spellbook entries, player binds spells to hotkeys in the spellbook overlay (F),
 	    // then selects them with 1-5 and casts with arrow keys.
 	    try {
 	      const idxPyro = inv0.bag.findIndex((s) => s?.id === 'helmet_pyro')
 	      const idxFrost = inv0.bag.findIndex((s) => s?.id === 'gloves_frost')
-	      if (idxPyro < 0 || idxFrost < 0)
-	        throw new Error(`expected to find helmet_pyro + gloves_frost in bag; idxPyro=${idxPyro} idxFrost=${idxFrost} bag=${JSON.stringify(inv0.bag)}`)
+	      const idxShield = inv0.bag.findIndex((s) => s?.id === 'shield_frost')
+	      if (idxPyro < 0 || idxFrost < 0 || idxShield < 0)
+	        throw new Error(`expected to find helmet_pyro + gloves_frost + shield_frost in bag; idxPyro=${idxPyro} idxFrost=${idxFrost} idxShield=${idxShield} bag=${JSON.stringify(inv0.bag)}`)
 	
 	      // Freeze enemies so casting is deterministic and does not affect later AI tests.
 	      await page.evaluate(() => {
@@ -770,6 +773,10 @@ try {
 	          idxFrost,
 	        })
 	        if (!equipGlovesOk?.ok) throw new Error(`expected equipping gloves_frost to succeed; res=${JSON.stringify(equipGlovesOk)}`)
+	        const equipShieldOk = await page.evaluate(({ idxShield }) => globalThis.__dbg?.moveInvItem?.({ type: 'bag', index: idxShield }, { type: 'equip', slot: 'shield' }), {
+	          idxShield,
+	        })
+	        if (!equipShieldOk?.ok) throw new Error(`expected equipping shield_frost to succeed; res=${JSON.stringify(equipShieldOk)}`)
 	        await page.waitForTimeout(160)
 	
 	        const hud1 = await page.evaluate(() => {
@@ -795,13 +802,14 @@ try {
 	          const slots = ui?.spellSlots ?? []
 	          const fb = slots.find((s) => s?.spell?.id === 'fireball')?.bg
 	          const ice = slots.find((s) => s?.spell?.id === 'iceblast')?.bg
+	          const bolt = slots.find((s) => s?.spell?.id === 'icebolt')?.bg
 	          const canvas = document.querySelector('canvas')
 	          const rect = canvas?.getBoundingClientRect?.()
-	          if (!fb || !ice || !rect) return null
+	          if (!fb || !ice || !bolt || !rect) return null
 	          const sx = rect.width / 960
 	          const sy = rect.height / 600
 	          const toPage = (p) => ({ x: rect.left + p.x * sx, y: rect.top + p.y * sy })
-	          return { fireball: toPage({ x: fb.x, y: fb.y }), iceblast: toPage({ x: ice.x, y: ice.y }) }
+	          return { fireball: toPage({ x: fb.x, y: fb.y }), iceblast: toPage({ x: ice.x, y: ice.y }), icebolt: toPage({ x: bolt.x, y: bolt.y }) }
 	        })
 	        if (!uiPts) throw new Error('could not read spellbook UI slot positions')
 	
@@ -838,6 +846,23 @@ try {
 	        })
 	        if (!(iceIndicator?.visible === true && String(iceIndicator.text ?? '') === '2'))
 	          throw new Error(`expected Ice Blast hotkey indicator=2; got ${JSON.stringify(iceIndicator)}`)
+
+	        // Bind Ice Bolt to 3.
+	        await page.mouse.move(uiPts.icebolt.x, uiPts.icebolt.y)
+	        await page.waitForTimeout(80)
+	        await page.keyboard.down('3')
+	        await page.waitForTimeout(60)
+	        await page.keyboard.up('3')
+	        await page.waitForTimeout(120)
+
+	        const boltIndicator = await page.evaluate(() => {
+	          const scene = globalThis.__dbg?.player?.scene
+	          const slots = scene?.spellbookUI?.spellSlots ?? []
+	          const slot = slots.find((s) => s?.spell?.id === 'icebolt') ?? null
+	          return { text: slot?.hotkey?.text ?? null, visible: slot?.hotkey?.visible ?? null }
+	        })
+	        if (!(boltIndicator?.visible === true && String(boltIndicator.text ?? '') === '3'))
+	          throw new Error(`expected Ice Bolt hotkey indicator=3; got ${JSON.stringify(boltIndicator)}`)
 	
 	        // Close spellbook overlay.
 	        await page.keyboard.down('f')
@@ -850,6 +875,78 @@ try {
 	        const invHot = await getInventory(page)
 	        if (invHot?.spellHotkeys?.[0] !== 'fireball') throw new Error(`expected hotkey 1=fireball; inv=${JSON.stringify(invHot)}`)
 	        if (invHot?.spellHotkeys?.[1] !== 'iceblast') throw new Error(`expected hotkey 2=iceblast; inv=${JSON.stringify(invHot)}`)
+	        if (invHot?.spellHotkeys?.[2] !== 'icebolt') throw new Error(`expected hotkey 3=icebolt; inv=${JSON.stringify(invHot)}`)
+	
+	        // Select Ice Bolt (3) and cast; should deal 0.5 damage and apply slow.
+	        await page.keyboard.down('3')
+	        await page.waitForTimeout(40)
+	        await page.keyboard.up('3')
+	        await page.waitForTimeout(80)
+	
+	        const hudBolt = await page.evaluate(() => {
+	          const scene = globalThis.__dbg?.player?.scene
+	          const ui = scene?.spellSlotUI
+	          return { name: ui?.name?.text ?? null }
+	        })
+	        if (!String(hudBolt?.name ?? '').toLowerCase().includes('ice bolt'))
+	          throw new Error(`expected HUD to show ice bolt; hud=${JSON.stringify(hudBolt)}`)
+	
+	        const enemiesBolt0 = await getEnemies(page)
+	        const slimeBolt0 = Array.isArray(enemiesBolt0) ? enemiesBolt0.find((e) => e.kind === 'slime') : null
+	        const slimeHpBolt0 = slimeBolt0?.hp
+	        if (typeof slimeHpBolt0 !== 'number') throw new Error(`expected numeric slime hp before ice bolt; enemies=${JSON.stringify(enemiesBolt0)}`)
+	
+	        const castBolt0 = await getLastCast(page)
+	        const prevCastAtBolt0 = typeof castBolt0?.at === 'number' ? castBolt0.at : 0
+	        await page.keyboard.down('ArrowRight')
+	        await page.waitForTimeout(80)
+	        await page.keyboard.up('ArrowRight')
+	
+	        let castAtBolt1 = null
+	        const startedCastWaitBolt = Date.now()
+	        while (Date.now() - startedCastWaitBolt < 1400) {
+	          const c = await getLastCast(page)
+	          const at = typeof c?.at === 'number' ? c.at : null
+	          if (typeof at === 'number' && at > prevCastAtBolt0) {
+	            castAtBolt1 = at
+	            break
+	          }
+	          await page.waitForTimeout(20)
+	        }
+	        if (!(typeof castAtBolt1 === 'number')) throw new Error('timed out waiting for ice bolt cast')
+	
+	        let slimeHpBolt1 = slimeHpBolt0
+	        const startedHpWaitBolt = Date.now()
+	        while (Date.now() - startedHpWaitBolt < 2400) {
+	          const enemies = await getEnemies(page)
+	          const s = Array.isArray(enemies) ? enemies.find((e) => e.kind === 'slime') : null
+	          const hp = s?.hp
+	          if (typeof hp === 'number') slimeHpBolt1 = hp
+	          if (typeof hp === 'number' && hp < slimeHpBolt0) break
+	          await page.waitForTimeout(40)
+	        }
+	        if (slimeHpBolt1 !== slimeHpBolt0 - 0.5)
+	          throw new Error(`expected ice bolt damage=0.5; before=${slimeHpBolt0} after=${slimeHpBolt1}`)
+
+	        // Slow should apply for ~1s.
+	        const slowMul0 = await page.evaluate(() => {
+	          const scene = globalThis.__dbg?.player?.scene
+	          const kids = scene?.mapRuntime?.enemies?.getChildren?.() ?? []
+	          const e = kids.find((k) => k?.active && k?.kind === 'slime')
+	          return typeof e?.getMoveSpeedMultiplier === 'function' ? e.getMoveSpeedMultiplier() : null
+	        })
+	        if (!(typeof slowMul0 === 'number' && slowMul0 <= 0.51 && slowMul0 >= 0.49))
+	          throw new Error(`expected slime slow multiplier ~= 0.5; got ${JSON.stringify(slowMul0)}`)
+
+	        await page.waitForTimeout(1100)
+	        const slowMul1 = await page.evaluate(() => {
+	          const scene = globalThis.__dbg?.player?.scene
+	          const kids = scene?.mapRuntime?.enemies?.getChildren?.() ?? []
+	          const e = kids.find((k) => k?.active && k?.kind === 'slime')
+	          return typeof e?.getMoveSpeedMultiplier === 'function' ? e.getMoveSpeedMultiplier() : null
+	        })
+	        if (!(typeof slowMul1 === 'number' && slowMul1 >= 0.98))
+	          throw new Error(`expected slime slow to expire (multiplier ~1); got ${JSON.stringify(slowMul1)}`)
 	
 	        // Select Ice Blast (2) and cast; should deal 2 damage.
 	        await page.keyboard.down('2')
@@ -1835,6 +1932,22 @@ try {
           delete b.__testPrevSpeed
         })
       }
+    }
+
+    // Stabilize before touch + weapon timing suites: if the player died in earlier AI/collision tests,
+    // gameplay is paused and these checks will fail for the wrong reason.
+    try {
+      const st0 = await getGameState(page)
+      if (st0?.paused) await togglePause(page)
+      if (st0?.gameOver) {
+        await respawn(page)
+        await page.waitForTimeout(400)
+      }
+      const max = await getPlayerMaxHp(page)
+      if (typeof max === 'number') await setPlayerHp(page, max)
+      await page.waitForTimeout(120)
+    } catch {
+      // ignore (test-only stabilization)
     }
 
 	    // Touch damage sanity: colliding with an enemy should reduce player hp with invuln.

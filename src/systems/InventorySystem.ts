@@ -105,6 +105,7 @@ export class InventorySystem {
     this.bag[3] = { id: 'chest_hearty', qty: 1 }
     this.bag[4] = { id: 'helmet_pyro', qty: 1 }
     this.bag[5] = { id: 'gloves_frost', qty: 1 }
+    this.bag[6] = { id: 'shield_frost', qty: 1 }
 
     // Starter helmet grants no spells, so selection starts empty.
     this.ensureSelectedSpellValid()
@@ -146,6 +147,7 @@ export class InventorySystem {
     this.bag[3] = { id: 'chest_hearty', qty: 1 }
     this.bag[4] = { id: 'helmet_pyro', qty: 1 }
     this.bag[5] = { id: 'gloves_frost', qty: 1 }
+    this.bag[6] = { id: 'shield_frost', qty: 1 }
 
     this.selectedSpell = null
     this.spellHotkeys = [null, null, null, null, null]

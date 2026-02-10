@@ -22,6 +22,7 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
   readonly kind: EnemyKind
   private hp: number
   private invulnUntil = 0
+  private slows: Array<{ mul: number; until: number }> = []
   readonly spawnX: number
   readonly spawnY: number
   private lastPlayerHitAt = -Infinity
@@ -68,6 +69,36 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     return this.hp
   }
 
+  applySlow(now: number, moveSpeedMul: number, durationMs: number) {
+    const mulRaw = typeof moveSpeedMul === 'number' && Number.isFinite(moveSpeedMul) ? moveSpeedMul : 1
+    const mul = Math.max(0, Math.min(1, mulRaw))
+    const dur = typeof durationMs === 'number' && Number.isFinite(durationMs) ? Math.max(0, Math.floor(durationMs)) : 0
+    if (dur <= 0) return false
+    // Treat >=1 as "no slow".
+    if (mul >= 0.9999) return false
+
+    const until = now + dur
+    this.slows.push({ mul, until })
+    // Keep this bounded; prune when we grow past a small cap.
+    if (this.slows.length > 12) {
+      const t = now - 1
+      this.slows = this.slows.filter((s) => s.until > t).slice(-8)
+    }
+    return true
+  }
+
+  getMoveSpeedMultiplier(nowRaw?: number) {
+    const now =
+      typeof nowRaw === 'number' && Number.isFinite(nowRaw)
+        ? (nowRaw as number)
+        : ((this.scene?.time?.now ?? 0) as number)
+
+    if (this.slows.length > 0) this.slows = this.slows.filter((s) => s.until > now)
+    let mul = 1
+    for (const s of this.slows) mul = Math.min(mul, s.mul)
+    return mul
+  }
+
   getTouchDamage() {
     return this.stats.touchDamage
   }
@@ -97,7 +128,7 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
   }
 
   getMoveSpeed() {
-    return this.stats.moveSpeed
+    return this.stats.moveSpeed * this.getMoveSpeedMultiplier()
   }
 
   getHitstunMs() {
@@ -119,7 +150,10 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
   damage(now: number, sourceX: number, sourceY: number, amount = 1) {
     if (!this.canTakeDamage(now)) return false
 
-    this.hp = this.hp - Math.max(1, Math.floor(amount))
+    const dmg = typeof amount === 'number' && Number.isFinite(amount) ? Math.max(0, amount) : 0
+    if (dmg <= 0) return false
+
+    this.hp = this.hp - dmg
     this.invulnUntil = now + this.stats.invulnMs
 
     this.setTintFill(0xffffff)

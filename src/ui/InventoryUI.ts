@@ -179,6 +179,21 @@ export class InventoryUI {
       g.strokeRoundedRect(10, 6, 12, 20, 6)
     })
 
+    ensure('item-shield-frost', (g) => {
+      // Shield with a cool "ice" highlight to read as spell-granting.
+      g.fillStyle(0x3b2a1a, 1)
+      g.fillRoundedRect(10, 6, 12, 20, 6)
+      g.fillStyle(0x6b4c2a, 1)
+      g.fillRoundedRect(11, 7, 10, 18, 6)
+      g.fillStyle(0x76fff8, 0.55)
+      g.fillRoundedRect(12, 9, 8, 3, 2)
+      g.fillStyle(0xd9e3ee, 0.85)
+      g.fillRoundedRect(15, 10, 2, 12, 1)
+      g.fillRoundedRect(13, 15, 6, 2, 1)
+      g.lineStyle(3, 0x0a0d12, 0.55)
+      g.strokeRoundedRect(10, 6, 12, 20, 6)
+    })
+
     ensure('item-sword', (g) => {
       g.fillStyle(0x1b1b1b, 0.8)
       g.fillRoundedRect(9, 20, 6, 7, 3)

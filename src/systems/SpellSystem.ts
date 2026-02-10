@@ -112,9 +112,23 @@ export class SpellSystem {
 
         // Stop on first enemy hit.
         p.markHit()
-        const dmg = Number.isFinite(p.damage) ? Math.max(0, Math.floor(p.damage)) : 0
-        if (dmg > 0) {
-          if (e.damage(this.scene.time.now, this.caster.x, this.caster.y, dmg)) this.lastCast.hits++
+        const dmg = Number.isFinite(p.damage) ? Math.max(0, p.damage) : 0
+        const hit = dmg > 0 ? e.damage(this.scene.time.now, this.caster.x, this.caster.y, dmg) : false
+        if (hit) {
+          this.lastCast.hits++
+          const def = SPELLS[p.spellId]
+          if (def && def.kind === 'projectile') {
+            const resolved = resolveSpellLevel(def, p.level)
+            const effects = resolved?.cfg?.onHit ?? []
+            for (const fx of effects) {
+              if (!fx || typeof fx !== 'object') continue
+              if ((fx as any).kind === 'slow') {
+                const mul = (fx as any).moveSpeedMul
+                const dur = (fx as any).durationMs
+                e.applySlow(this.scene.time.now, mul, dur)
+              }
+            }
+          }
         }
         p.destroy()
       })
@@ -161,7 +175,7 @@ export class SpellSystem {
     if (!dir) return false
 
     const cfg = resolved.cfg
-    const dmg = Number.isFinite(cfg.damage) ? Math.max(0, Math.floor(cfg.damage)) : 0
+    const dmg = Number.isFinite(cfg.damage) ? Math.max(0, cfg.damage) : 0
     const speed = spellSpeedPxPerSec(cfg.speedTilesPerSec)
 
     const body = this.caster.body as Phaser.Physics.Arcade.Body | undefined

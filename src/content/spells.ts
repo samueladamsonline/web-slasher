@@ -1,14 +1,18 @@
 import { TILE_SIZE } from '../game/constants'
 
-export type SpellId = 'fireball' | 'iceblast'
+export type SpellId = 'fireball' | 'iceblast' | 'icebolt'
 
 export type SpellGrant = { id: SpellId; level: number }
+
+export type SpellOnHitEffect = { kind: 'slow'; moveSpeedMul: number; durationMs: number }
 
 export type ProjectileSpellLevel = {
   damage: number
   // Speed expressed in tiles/sec, converted to px/sec at runtime.
   speedTilesPerSec: number
   cooldownMs: number
+  // Optional on-hit effects (for example, debuffs).
+  onHit?: SpellOnHitEffect[]
 }
 
 export type ProjectileSpellDef = {
@@ -69,6 +73,25 @@ export const SPELLS: Record<SpellId, SpellDef> = {
         damage: 2,
         speedTilesPerSec: 13,
         cooldownMs: 520,
+      },
+    },
+  },
+  icebolt: {
+    kind: 'projectile',
+    id: 'icebolt',
+    name: 'Ice Bolt',
+    projectileTexture: 'spell-icebolt',
+    iconTexture: 'spell-icon-icebolt',
+    coreColor: 0x9ad7ff,
+    glowColor: 0x5da3ff,
+    radius: 5,
+    ttlMs: 2700,
+    levels: {
+      1: {
+        damage: 0.5,
+        speedTilesPerSec: 14,
+        cooldownMs: 520,
+        onHit: [{ kind: 'slow', moveSpeedMul: 0.5, durationMs: 1000 }],
       },
     },
   },

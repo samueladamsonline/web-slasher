@@ -17,6 +17,13 @@ function sameSpell(a: SpellGrant | null, b: SpellGrant | null) {
   return a.id === b.id && a.level === b.level
 }
 
+function formatStatNumber(n: number) {
+  const v = typeof n === 'number' && Number.isFinite(n) ? n : 0
+  const rounded = Math.round(v * 100) / 100
+  if (Math.abs(rounded - Math.round(rounded)) < 0.000001) return String(Math.round(rounded))
+  return String(rounded)
+}
+
 export class SpellbookUI {
   private scene: Phaser.Scene
   private inventory: InventorySystem
@@ -319,9 +326,20 @@ export class SpellbookUI {
       const cfg = resolved?.cfg ?? null
       if (cfg) {
         lines.push('Type: Projectile')
-        lines.push(`Damage: ${Math.max(0, Math.floor(cfg.damage))}`)
+        lines.push(`Damage: ${formatStatNumber(Math.max(0, cfg.damage))}`)
         lines.push(`Speed: ${Math.max(0, Math.floor(cfg.speedTilesPerSec))} tiles/s`)
         lines.push(`Cooldown: ${Math.max(0, Math.floor(cfg.cooldownMs))} ms`)
+        const onHit = cfg.onHit ?? []
+        for (const fx of onHit) {
+          if (!fx) continue
+          if (fx.kind === 'slow') {
+            const mul = Math.max(0, Math.min(1, fx.moveSpeedMul))
+            const dur = Math.max(0, Math.floor(fx.durationMs))
+            const slowPct = Math.round((1 - mul) * 100)
+            const sec = dur / 1000
+            lines.push(`On Hit: Slow ${slowPct}% for ${formatStatNumber(sec)}s`)
+          }
+        }
       }
     }
 

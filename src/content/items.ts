@@ -19,6 +19,7 @@ export type ItemId =
   | 'gloves_quick'
   | 'gloves_frost'
   | 'chest_hearty'
+  | 'shield_frost'
   // Weapons (also used by combat).
   | WeaponId
 
@@ -112,6 +113,14 @@ export const ITEMS: Record<ItemId, ItemDef> = {
     texture: 'item-gloves-frost',
     stackable: false,
     equip: { slot: 'gloves', armor: 1, spells: [{ id: 'iceblast', level: 2 }] },
+  },
+  shield_frost: {
+    id: 'shield_frost',
+    name: 'Frost Buckler',
+    kind: 'equipment',
+    texture: 'item-shield-frost',
+    stackable: false,
+    equip: { slot: 'shield', armor: 1, spells: [{ id: 'icebolt', level: 1 }] },
   },
   chest_hearty: {
     id: 'chest_hearty',
