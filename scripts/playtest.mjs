@@ -1046,6 +1046,25 @@ try {
     await page.keyboard.up('i')
     await page.waitForTimeout(160)
 
+    // Details panel default view: when not hovering an item, show aggregated equipped stats.
+    // (Still shows per-item stats when hovering.)
+    const statsDetails = await page.evaluate(() => {
+      const scene = globalThis.__dbg?.player?.scene
+      const ui = scene?.inventoryUI
+      if (!ui?.detailsRegion) return null
+      if (typeof ui.setHovered === 'function') ui.setHovered(null)
+      return { title: ui.detailsTitle?.text ?? null, body: ui.detailsBody?.text ?? null }
+    })
+    if (statsDetails) {
+      const title = String(statsDetails.title ?? '')
+      const body = String(statsDetails.body ?? '')
+      if (!title.toLowerCase().includes('equipped')) throw new Error(`expected details title to be equipped stats; title=${JSON.stringify(title)}`)
+      if (!body.includes('Attack Damage')) throw new Error(`expected equipped stats to include Attack Damage; body=${JSON.stringify(body)}`)
+      if (!body.includes('Attack Speed')) throw new Error(`expected equipped stats to include Attack Speed; body=${JSON.stringify(body)}`)
+      if (!body.includes('Move Speed')) throw new Error(`expected equipped stats to include Move Speed; body=${JSON.stringify(body)}`)
+      if (!body.includes('Spells')) throw new Error(`expected equipped stats to include Spells; body=${JSON.stringify(body)}`)
+    }
+
     const uiPts = await page.evaluate(({ emptyIdx }) => {
       const scene = globalThis.__dbg?.player?.scene
       const ui = scene?.inventoryUI

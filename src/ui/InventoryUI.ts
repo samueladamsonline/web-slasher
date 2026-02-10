@@ -763,11 +763,39 @@ export class InventoryUI {
 
     if (!itemId) {
       this.detailsIcon.setVisible(false)
-      this.detailsTitle.setText('Hover an item').setPosition(left, top).setVisible(true)
-      this.detailsBody
-        .setText('Stats and effects will appear here.\n\nDrag items between STASH and EQUIPPED to manage gear.')
-        .setPosition(left, top + 30)
-        .setVisible(true)
+      this.detailsTitle.setText('Equipped Stats').setPosition(left, top).setVisible(true)
+
+      const stats = this.inventory.getPlayerStats()
+      const lines: string[] = []
+
+      if (stats.weapon) {
+        lines.push(`Weapon: ${stats.weapon.name}`)
+        lines.push(`Attack Damage: +${stats.attackDamage}`)
+      } else {
+        lines.push(`Weapon: None`)
+        lines.push(`Attack Damage: 0`)
+      }
+
+      lines.push(`Attack Speed: +${Math.floor(stats.attackSpeedPct)}%`)
+      lines.push(`Move Speed: +${Math.floor(stats.moveSpeedPct)}%`)
+      lines.push(`Max HP: +${Math.floor(stats.maxHpBonus)} Hearts`)
+
+      if (stats.spells.length) {
+        const formatted = stats.spells
+          .map((s) => {
+            const spellDef = SPELLS[s.id]
+            return `${spellDef?.name ?? String(s.id)} (Lv ${s.level})`
+          })
+          .join(', ')
+        lines.push(`Spells: ${formatted}`)
+      } else {
+        lines.push(`Spells: None`)
+      }
+
+      lines.push('')
+      lines.push('Tip: Hover an item to see its stats.')
+
+      this.detailsBody.setText(lines.join('\n')).setPosition(left, top + 30).setVisible(true)
       return
     }
 

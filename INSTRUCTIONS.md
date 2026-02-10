@@ -17,6 +17,7 @@ Web-Slasher is a Phaser-based 2D top-down action RPG. The game is organized arou
 - `SpellSystem`: handles spell casting and projectile spells (data-driven from `src/content/spells.ts`).
 - `PlayerHealthSystem`: damage, invulnerability, and health UI. Touch damage uses overlap + swept-circle check for tunneling.
 - `InventorySystem`: equipment, weapons, and bag.
+- `InventoryUI`: Diablo-2-ish overlay for EQUIPPED + STASH; the right-side Details panel shows hovered item stats, and shows aggregated equipped stats when nothing is hovered.
 - `PickupSystem` + `LootSystem`: drops and auto-pickups.
 - `InteractionSystem`: sign/chest/doors and dialogue.
 - `SaveSystem`: persistence of inventory/world/checkpoint.
