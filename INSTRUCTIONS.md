@@ -15,6 +15,7 @@ Web-Slasher is a Phaser-based 2D top-down action RPG. The game is organized arou
 - `EnemyAISystem`: finite state machines per enemy. Bats use path-following when line-of-sight is blocked; slimes wander/leash.
 - `CombatSystem`: handles player attacks and hit detection.
 - `SpellSystem`: handles spell casting and projectile spells (data-driven from `src/content/spells.ts`), including optional on-hit effects (for example slow).
+- `StatusEffectSystem`: updates enemy status-effect visuals (for example a slow icon) and keeps those indicators attached to enemies.
 - `SpellbookUI`: overlay for viewing available spells and assigning spell hotkeys.
 - `SpellSlotUI`: bottom-right HUD slot showing the currently selected spell (icon + name).
 - `PlayerHealthSystem`: damage, invulnerability, and health UI. Touch damage uses overlap + swept-circle check for tunneling.
@@ -26,6 +27,7 @@ Web-Slasher is a Phaser-based 2D top-down action RPG. The game is organized arou
 - `SoundSystem`: listens to game events and plays SFX (attack swing, hits, pickups, UI open/close).
 - `MapRuntime`: tilemap collision, warps, LOS checks, and pathfinding.
 - `Hero` (`src/entities/Hero.ts`): movement/attack/hurt finite state machine. Attacks do not hard-lock movement; if movement input is held, the hero keeps moving while the attack timing still runs.
+- `HeroGear` (`src/entities/HeroGear.ts`): modular equipped visuals (weapon/shield/armor) rendered as separate sprites attached to the hero each frame; weapon swing is animated separately to avoid combinatorial hero sprites.
 
 ## Player Stats
 Player power is derived from equipment via `InventorySystem.getPlayerStats()`:
@@ -35,7 +37,7 @@ Player power is derived from equipment via `InventorySystem.getPlayerStats()`:
 - Chest: `maxHpBonus` (adds flat hearts to max HP; if the player was full, stays full on increases).
 - Spells: equipped items can grant spells (`spell id + level`). The player has a single `selectedSpell` at a time.
   - If multiple equipped items grant the same spell at different levels, the highest level wins.
-  - Spells may define on-hit effects (for example, Ice Bolt slows enemies) in `src/content/spells.ts`.
+  - Spells may define on-hit effects (for example, Ice Bolt slows enemies) in `src/content/spells.ts`. The effect schema lives in `src/game/statusEffects.ts`.
 
 Spell input and selection:
 - `1-5`: select the spell assigned to that hotkey (spells only; no weapon quick-equip).

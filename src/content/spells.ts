@@ -1,10 +1,9 @@
 import { TILE_SIZE } from '../game/constants'
+import type { StatusEffect } from '../game/statusEffects'
 
 export type SpellId = 'fireball' | 'iceblast' | 'icebolt'
 
 export type SpellGrant = { id: SpellId; level: number }
-
-export type SpellOnHitEffect = { kind: 'slow'; moveSpeedMul: number; durationMs: number }
 
 export type ProjectileSpellLevel = {
   damage: number
@@ -12,7 +11,7 @@ export type ProjectileSpellLevel = {
   speedTilesPerSec: number
   cooldownMs: number
   // Optional on-hit effects (for example, debuffs).
-  onHit?: SpellOnHitEffect[]
+  onHit?: StatusEffect[]
 }
 
 export type ProjectileSpellDef = {

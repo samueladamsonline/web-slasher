@@ -13,6 +13,7 @@ import { PlayerHealthSystem } from '../systems/PlayerHealthSystem'
 import { SoundSystem } from '../systems/SoundSystem'
 import { CombatSystem } from '../systems/CombatSystem'
 import { SpellSystem } from '../systems/SpellSystem'
+import { StatusEffectSystem } from '../systems/StatusEffectSystem'
 import { SaveSystem, type SaveDataV1 } from '../systems/SaveSystem'
 import { HeartsUI } from '../ui/HeartsUI'
 import { DialogueUI } from '../ui/DialogueUI'
@@ -38,6 +39,7 @@ export class GameScene extends Phaser.Scene {
   private combat!: CombatSystem
   private spells!: SpellSystem
   private enemyAI!: EnemyAISystem
+  private statusFx!: StatusEffectSystem
   private health!: PlayerHealthSystem
   private loot!: LootSystem
   private world!: WorldState
@@ -91,6 +93,7 @@ export class GameScene extends Phaser.Scene {
     InventoryUI.preload(this)
     SoundSystem.preload(this)
     SpellSlotUI.preload(this)
+    StatusEffectSystem.preload(this)
   }
 
   create() {
@@ -186,6 +189,7 @@ export class GameScene extends Phaser.Scene {
       findPath: (fromX, fromY, toX, toY) => this.mapRuntime.findPath(fromX, fromY, toX, toY),
       hasLineOfSight: (fromX, fromY, toX, toY) => this.mapRuntime.hasLineOfSight(fromX, fromY, toX, toY),
     })
+    this.statusFx = new StatusEffectSystem(this, () => this.mapRuntime.enemies)
 
     this.minimap = new MinimapUI(this, this.hero, {
       getMapKey: () => this.mapRuntime.mapKey,
@@ -223,6 +227,7 @@ export class GameScene extends Phaser.Scene {
     this.mapRuntime?.destroy?.()
     this.sfx?.destroy?.()
     this.spells?.destroy?.()
+    this.statusFx?.destroy?.()
 
     this.minimap?.destroy?.()
     this.inventoryUI?.destroy?.()
@@ -362,6 +367,7 @@ export class GameScene extends Phaser.Scene {
       return
     }
     this.enemyAI.update(this.time.now, delta)
+    this.statusFx.update(this.time.now)
   }
 
   private createEnemyAnims() {

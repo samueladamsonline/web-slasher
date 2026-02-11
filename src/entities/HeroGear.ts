@@ -52,6 +52,21 @@ export class HeroGear {
     this.updateArmor(px, py, facing)
   }
 
+  getDebug() {
+    const tex = (img: Phaser.GameObjects.Image) => {
+      const key = (img.texture as any)?.key
+      return typeof key === 'string' ? key : null
+    }
+    return {
+      weapon: { visible: this.weapon.visible, texture: tex(this.weapon) },
+      shield: { visible: this.shield.visible, texture: tex(this.shield) },
+      helmet: { visible: this.helmet.visible, texture: tex(this.helmet) },
+      chest: { visible: this.chest.visible, texture: tex(this.chest) },
+      gloves: { visible: this.gloves.visible, texture: tex(this.gloves) },
+      boots: { visible: this.boots.visible, texture: tex(this.boots) },
+    }
+  }
+
   private makeSprite(texture: string, depth: number) {
     return this.scene.add.image(0, 0, texture).setOrigin(0.5, 0.5).setDepth(depth).setVisible(false)
   }
@@ -63,11 +78,11 @@ export class HeroGear {
       return
     }
 
-    const isGreat = weapon.id === 'greatsword'
+    const isTwoHanded = weapon.hands === 2
     const baseRot: Record<Facing, number> = { right: 0, down: Math.PI / 2, left: Math.PI, up: -Math.PI / 2 }
     const rot = baseRot[facing] ?? 0
 
-    const offsets: Record<Facing, Vec2> = isGreat
+    const offsets: Record<Facing, Vec2> = isTwoHanded
       ? { right: { x: 22, y: 6 }, left: { x: -22, y: 6 }, up: { x: 0, y: -28 }, down: { x: 0, y: 24 } }
       : { right: { x: 16, y: 5 }, left: { x: -16, y: 5 }, up: { x: 0, y: -22 }, down: { x: 0, y: 20 } }
     const off = offsets[facing] ?? offsets.down
@@ -75,23 +90,26 @@ export class HeroGear {
     this.weapon.setTexture(weapon.vfx.weaponTexture)
     this.weapon.setPosition(px + off.x, py + off.y)
     this.weapon.setRotation(rot)
-    this.weapon.setScale(isGreat ? 0.58 : 0.48)
+    this.weapon.setScale(isTwoHanded ? 0.58 : 0.48)
+    this.weapon.setDepth(facing === 'up' ? DEPTH_PLAYER - 0.02 : DEPTH_PLAYER + 0.2)
 
     const attacking = this.hero.getState() === 'attack'
-    if (isGreat && attacking) {
+    if (isTwoHanded && attacking) {
       this.weapon.setVisible(false)
-      if (didStartAttack) this.spawnGreatswordSwing(px, py, rot, off)
+      if (didStartAttack)
+        this.spawnWeaponSwing(px, py, rot, off, weapon.vfx.weaponTexture, weapon.hands, facing === 'up' ? DEPTH_PLAYER - 0.01 : DEPTH_PLAYER + 0.3)
     } else {
       this.weapon.setVisible(true)
-      if (!isGreat && didStartAttack) this.spawnSwordSwing(px, py, rot, off)
+      if (!isTwoHanded && didStartAttack)
+        this.spawnWeaponSwing(px, py, rot, off, weapon.vfx.weaponTexture, weapon.hands, facing === 'up' ? DEPTH_PLAYER - 0.01 : DEPTH_PLAYER + 0.3)
     }
   }
 
   private updateShield(px: number, py: number, facing: Facing) {
     const shieldId = this.inventory.getEquipment('shield')
     const weapon = this.inventory.getWeaponDef()
-    const isGreat = weapon?.id === 'greatsword'
-    const showShield = !!shieldId && !isGreat
+    const isTwoHanded = weapon?.hands === 2
+    const showShield = !!shieldId && !isTwoHanded
     if (!showShield) {
       this.shield.setVisible(false)
       return
@@ -108,6 +126,7 @@ export class HeroGear {
     this.shield.setTexture(tex)
     this.shield.setPosition(px + off.x, py + off.y)
     this.shield.setScale(0.5)
+    this.shield.setDepth(facing === 'up' ? DEPTH_PLAYER - 0.03 : DEPTH_PLAYER + 0.1)
     this.shield.setVisible(true)
   }
 
@@ -160,49 +179,24 @@ export class HeroGear {
     apply('boots', this.boots)
   }
 
-  private spawnGreatswordSwing(px: number, py: number, baseRot: number, off: Vec2) {
-    const weapon = this.inventory.getWeaponDef()
-    if (!weapon || weapon.id !== 'greatsword') return
-
+  private spawnWeaponSwing(px: number, py: number, baseRot: number, off: Vec2, texture: string, hands: number, depth: number) {
+    const isTwoHanded = hands === 2
     const swing = this.scene.add
-      .image(px + off.x, py + off.y, weapon.vfx.weaponTexture)
+      .image(px + off.x, py + off.y, texture)
       .setOrigin(0.2, 0.5)
-      .setDepth(DEPTH_PLAYER + 0.3)
-      .setScale(0.6)
-      .setAlpha(0.9)
+      .setDepth(depth)
+      .setScale(isTwoHanded ? 0.6 : 0.52)
+      .setAlpha(isTwoHanded ? 0.9 : 0.85)
 
-    const arc = 0.7
+    const arc = isTwoHanded ? 0.7 : 0.55
+    const dur = isTwoHanded ? 160 : 130
     swing.setRotation(baseRot - arc)
 
     this.scene.tweens.add({
       targets: swing,
       rotation: { from: baseRot - arc, to: baseRot + arc },
-      alpha: { from: 0.9, to: 0 },
-      duration: 160,
-      ease: 'sine.out',
-      onComplete: () => swing.destroy(),
-    })
-  }
-
-  private spawnSwordSwing(px: number, py: number, baseRot: number, off: Vec2) {
-    const weapon = this.inventory.getWeaponDef()
-    if (!weapon || weapon.id !== 'sword') return
-
-    const swing = this.scene.add
-      .image(px + off.x, py + off.y, weapon.vfx.weaponTexture)
-      .setOrigin(0.2, 0.5)
-      .setDepth(DEPTH_PLAYER + 0.3)
-      .setScale(0.52)
-      .setAlpha(0.85)
-
-    const arc = 0.55
-    swing.setRotation(baseRot - arc)
-
-    this.scene.tweens.add({
-      targets: swing,
-      rotation: { from: baseRot - arc, to: baseRot + arc },
-      alpha: { from: 0.85, to: 0 },
-      duration: 130,
+      alpha: { from: swing.alpha, to: 0 },
+      duration: dur,
       ease: 'sine.out',
       onComplete: () => swing.destroy(),
     })

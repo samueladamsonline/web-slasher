@@ -110,24 +110,23 @@ export class SpellSystem {
         if (!(e instanceof Enemy)) return
         if (!p.active || !e.active) return
 
+        const now = this.scene.time.now
+
         // Stop on first enemy hit.
         p.markHit()
         const dmg = Number.isFinite(p.damage) ? Math.max(0, p.damage) : 0
-        const hit = dmg > 0 ? e.damage(this.scene.time.now, this.caster.x, this.caster.y, dmg) : false
-        if (hit) {
-          this.lastCast.hits++
+        const canAffect = e.canTakeDamage(now)
+
+        let didDamage = false
+        if (canAffect && dmg > 0) didDamage = e.damage(now, this.caster.x, this.caster.y, dmg)
+        if (didDamage) this.lastCast.hits++
+
+        if (canAffect) {
           const def = SPELLS[p.spellId]
           if (def && def.kind === 'projectile') {
             const resolved = resolveSpellLevel(def, p.level)
             const effects = resolved?.cfg?.onHit ?? []
-            for (const fx of effects) {
-              if (!fx || typeof fx !== 'object') continue
-              if ((fx as any).kind === 'slow') {
-                const mul = (fx as any).moveSpeedMul
-                const dur = (fx as any).durationMs
-                e.applySlow(this.scene.time.now, mul, dur)
-              }
-            }
+            for (const fx of effects) e.applyStatusEffect(now, fx)
           }
         }
         p.destroy()

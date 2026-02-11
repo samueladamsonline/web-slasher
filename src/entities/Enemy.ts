@@ -4,6 +4,8 @@ import { ENEMIES } from './enemies'
 import { DEPTH_ENEMY } from '../game/constants'
 import { emitGameEvent, GAME_EVENTS } from '../game/events'
 import { getTiledNumber, getTiledProp, type TiledProps } from '../game/tiled'
+import { StatusEffects } from '../game/statusEffects'
+import type { StatusEffect, StatusEffectKind } from '../game/statusEffects'
 
 type EnemyStats = Pick<
   EnemyDef,
@@ -22,7 +24,7 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
   readonly kind: EnemyKind
   private hp: number
   private invulnUntil = 0
-  private slows: Array<{ mul: number; until: number }> = []
+  private effects = new StatusEffects()
   readonly spawnX: number
   readonly spawnY: number
   private lastPlayerHitAt = -Infinity
@@ -69,34 +71,25 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     return this.hp
   }
 
-  applySlow(now: number, moveSpeedMul: number, durationMs: number) {
-    const mulRaw = typeof moveSpeedMul === 'number' && Number.isFinite(moveSpeedMul) ? moveSpeedMul : 1
-    const mul = Math.max(0, Math.min(1, mulRaw))
-    const dur = typeof durationMs === 'number' && Number.isFinite(durationMs) ? Math.max(0, Math.floor(durationMs)) : 0
-    if (dur <= 0) return false
-    // Treat >=1 as "no slow".
-    if (mul >= 0.9999) return false
-
-    const until = now + dur
-    this.slows.push({ mul, until })
-    // Keep this bounded; prune when we grow past a small cap.
-    if (this.slows.length > 12) {
-      const t = now - 1
-      this.slows = this.slows.filter((s) => s.until > t).slice(-8)
-    }
-    return true
+  applyStatusEffect(now: number, effect: StatusEffect) {
+    return this.effects.apply(now, effect)
   }
 
+  hasStatusEffect(kind: StatusEffectKind, nowRaw?: number) {
+    const now =
+      typeof nowRaw === 'number' && Number.isFinite(nowRaw)
+        ? (nowRaw as number)
+        : ((this.scene?.time?.now ?? 0) as number)
+    return this.effects.has(kind, now)
+  }
+
+  // Used by tests/debugging.
   getMoveSpeedMultiplier(nowRaw?: number) {
     const now =
       typeof nowRaw === 'number' && Number.isFinite(nowRaw)
         ? (nowRaw as number)
         : ((this.scene?.time?.now ?? 0) as number)
-
-    if (this.slows.length > 0) this.slows = this.slows.filter((s) => s.until > now)
-    let mul = 1
-    for (const s of this.slows) mul = Math.min(mul, s.mul)
-    return mul
+    return this.effects.getMoveSpeedMul(now)
   }
 
   getTouchDamage() {
