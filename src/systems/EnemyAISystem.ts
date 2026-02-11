@@ -2,6 +2,16 @@ import * as Phaser from 'phaser'
 import { Enemy } from '../entities/Enemy'
 import { StateMachine } from '../game/StateMachine'
 import { offGameEvent, onGameEvent, GAME_EVENTS, type GameEventMap } from '../game/events'
+import {
+  canStartAttack,
+  computeStrikeCenter,
+  createAttackState,
+  isAttackLocked,
+  startAttack,
+  updateAttack,
+  type AttackState,
+} from './enemyAI/attackModel'
+import { resolveBatTransition, type BatMode } from './enemyAI/batTransitions'
 
 type EnemyController = {
   update: (now: number, dt: number) => void
@@ -9,13 +19,23 @@ type EnemyController = {
 }
 
 type SlimeState = 'wander' | 'leash' | 'hitstun'
-type SlimeCtx = { enemy: Enemy; seed: number; hitstunUntil: number }
+type SlimeCtx = { enemy: Enemy; seed: number; hitstunUntil: number; attack: AttackState }
 
-type BatState = 'hover' | 'chase' | 'return' | 'hitstun'
-type BatCtx = { enemy: Enemy; hitstunUntil: number; aggroCooldownUntil: number; returningFromLeash: boolean }
+type BatState = BatMode
+type BatCtx = { enemy: Enemy; hitstunUntil: number; aggroCooldownUntil: number; returningFromLeash: boolean; attack: AttackState }
 
 type EnemyDamagedEvent = GameEventMap[typeof GAME_EVENTS.ENEMY_DAMAGED]
 type PathResult = { points: Array<{ x: number; y: number }> }
+
+export type EnemyStrikePayload = {
+  enemy: Enemy
+  now: number
+  sourceX: number
+  sourceY: number
+  damage: number
+  knockback: number
+  hitRadius: number
+}
 
 export class EnemyAISystem {
   private scene: Phaser.Scene
@@ -23,6 +43,7 @@ export class EnemyAISystem {
   private getEnemyGroup: () => Phaser.Physics.Arcade.Group | undefined
   private findPath?: (fromX: number, fromY: number, toX: number, toY: number) => PathResult | null
   private hasLineOfSight?: (fromX: number, fromY: number, toX: number, toY: number) => boolean
+  private onEnemyStrike?: (strike: EnemyStrikePayload) => void
 
   private controllers = new WeakMap<Enemy, EnemyController>()
 
@@ -33,6 +54,7 @@ export class EnemyAISystem {
     opts?: {
       findPath?: (fromX: number, fromY: number, toX: number, toY: number) => PathResult | null
       hasLineOfSight?: (fromX: number, fromY: number, toX: number, toY: number) => boolean
+      onEnemyStrike?: (strike: EnemyStrikePayload) => void
     },
   ) {
     this.scene = scene
@@ -40,6 +62,7 @@ export class EnemyAISystem {
     this.getEnemyGroup = getEnemyGroup
     this.findPath = opts?.findPath
     this.hasLineOfSight = opts?.hasLineOfSight
+    this.onEnemyStrike = opts?.onEnemyStrike
 
     onGameEvent(this.scene.events, GAME_EVENTS.ENEMY_DAMAGED, this.onEnemyDamaged)
   }
@@ -75,9 +98,74 @@ export class EnemyAISystem {
     return next
   }
 
+  private getPlayerCenter() {
+    const body = this.player.body as Phaser.Physics.Arcade.Body | undefined
+    const cx = body?.center?.x
+    const cy = body?.center?.y
+    return {
+      x: Number.isFinite(cx) ? (cx as number) : this.player.x,
+      y: Number.isFinite(cy) ? (cy as number) : this.player.y,
+    }
+  }
+
+  private getPlayerRadius() {
+    const body = this.player.body as Phaser.Physics.Arcade.Body | undefined
+    const w = typeof body?.width === 'number' ? body.width : 0
+    const h = typeof body?.height === 'number' ? body.height : 0
+    return Math.max(6, Math.max(w, h) * 0.5 + 4)
+  }
+
+  private getEnemyCenter(enemy: Enemy) {
+    const body = enemy.body as Phaser.Physics.Arcade.Body | undefined
+    const cx = body?.center?.x
+    const cy = body?.center?.y
+    return {
+      x: Number.isFinite(cx) ? (cx as number) : enemy.x,
+      y: Number.isFinite(cy) ? (cy as number) : enemy.y,
+    }
+  }
+
+  private tryBeginAttack(enemy: Enemy, attack: AttackState, now: number, dx: number, dy: number) {
+    if (enemy.getMoveSpeed() <= 0) return false
+    if (!canStartAttack(enemy, attack, now)) return false
+
+    const atk = enemy.getAttackConfig()
+    const playerRadius = this.getPlayerRadius()
+    const dist = Math.hypot(dx, dy)
+    const startRange = atk.hitbox.offset + atk.hitbox.radius + playerRadius + 4
+    if (dist > startRange) return false
+
+    startAttack(enemy, attack, now, { x: dx, y: dy })
+    enemy.setVelocity(0, 0)
+    this.tickAttack(enemy, attack, now)
+    return true
+  }
+
+  private tickAttack(enemy: Enemy, attack: AttackState, now: number) {
+    if (enemy.getMoveSpeed() <= 0) return
+    const tick = updateAttack(enemy, attack, now)
+    if (!tick.shouldStrike || !this.onEnemyStrike) return
+
+    const atk = enemy.getAttackConfig()
+    const e = this.getEnemyCenter(enemy)
+    const hit = computeStrikeCenter(e.x, e.y, atk.hitbox.offset, attack.aim)
+    const player = this.getPlayerCenter()
+    if (this.hasLineOfSight && !this.hasLineOfSight(hit.x, hit.y, player.x, player.y)) return
+
+    this.onEnemyStrike({
+      enemy,
+      now,
+      sourceX: hit.x,
+      sourceY: hit.y,
+      damage: atk.damage,
+      knockback: atk.knockback,
+      hitRadius: atk.hitbox.radius,
+    })
+  }
+
   private createSlimeController(enemy: Enemy): EnemyController {
     const seed = Math.floor((enemy.spawnX + enemy.spawnY) / 16) % 4
-    const ctx: SlimeCtx = { enemy, seed, hitstunUntil: 0 }
+    const ctx: SlimeCtx = { enemy, seed, hitstunUntil: 0, attack: createAttackState() }
 
     const dirs = [
       { x: 1, y: 0 },
@@ -117,6 +205,17 @@ export class EnemyAISystem {
               return
             }
 
+            const p = this.getPlayerCenter()
+            const e = this.getEnemyCenter(enemy)
+            const dx = p.x - e.x
+            const dy = p.y - e.y
+            if (this.tryBeginAttack(enemy, c.attack, now, dx, dy)) return
+            if (isAttackLocked(c.attack)) {
+              enemy.setVelocity(0, 0)
+              this.tickAttack(enemy, c.attack, now)
+              return
+            }
+
             const speed = enemy.getMoveSpeed()
             const phase = (Math.floor(now / 900) + c.seed) % 4
             const d = dirs[phase]!
@@ -137,6 +236,11 @@ export class EnemyAISystem {
               fsm.transition('wander', c, now)
               return
             }
+            if (isAttackLocked(c.attack)) {
+              enemy.setVelocity(0, 0)
+              this.tickAttack(enemy, c.attack, now)
+              return
+            }
             goHome()
           },
         },
@@ -150,23 +254,32 @@ export class EnemyAISystem {
     })
 
     return {
-      update: (now, dt) => fsm.update(ctx, now, dt),
+      update: (now, dt) => {
+        if (enemy.getMoveSpeed() <= 0) {
+          enemy.setVelocity(0, 0)
+          this.cancelAttack(ctx.attack)
+          return
+        }
+        this.tickAttack(enemy, ctx.attack, now)
+        fsm.update(ctx, now, dt)
+      },
       onDamaged: (now) => {
-        // Keep this short so wander/chase resumes quickly after knockback.
         ctx.hitstunUntil = now + Math.max(0, Math.floor(enemy.getHitstunMs()))
+        ctx.attack.phase = 'ready'
+        ctx.attack.phaseUntil = 0
+        ctx.attack.didStrike = false
         fsm.transition('hitstun', ctx, now)
       },
     }
   }
 
   private createBatController(enemy: Enemy): EnemyController {
-    const ctx: BatCtx = { enemy, hitstunUntil: 0, aggroCooldownUntil: 0, returningFromLeash: false }
+    const ctx: BatCtx = { enemy, hitstunUntil: 0, aggroCooldownUntil: 0, returningFromLeash: false, attack: createAttackState() }
 
     const PATH_RECALC_MS = 220
     const WAYPOINT_RADIUS = 6
     const STUCK_TIMEOUT_MS = 350
     const HOME_RADIUS = 14
-    const AGGRO_COOLDOWN_MS = 1000
 
     const pathState = {
       targetKey: '',
@@ -188,26 +301,9 @@ export class EnemyAISystem {
       pathState.mode = 'path'
     }
 
-    const getPlayerCenter = () => {
-      const body = this.player.body as Phaser.Physics.Arcade.Body | undefined
-      const cx = body?.center?.x
-      const cy = body?.center?.y
-      return {
-        x: Number.isFinite(cx) ? (cx as number) : this.player.x,
-        y: Number.isFinite(cy) ? (cy as number) : this.player.y,
-      }
-    }
-
-    const getEnemyCenter = () => {
-      const body = enemy.body as Phaser.Physics.Arcade.Body | undefined
-      const cx = body?.center?.x
-      const cy = body?.center?.y
-      return { x: Number.isFinite(cx) ? (cx as number) : enemy.x, y: Number.isFinite(cy) ? (cy as number) : enemy.y }
-    }
-
     const getPlayerVec = () => {
-      const p = getPlayerCenter()
-      const e = getEnemyCenter()
+      const p = this.getPlayerCenter()
+      const e = this.getEnemyCenter(enemy)
       const dx = p.x - e.x
       const dy = p.y - e.y
       const dist0 = Math.hypot(dx, dy)
@@ -217,7 +313,7 @@ export class EnemyAISystem {
 
     const seek = (targetX: number, targetY: number, dt: number) => {
       const speed = enemy.getMoveSpeed()
-      const e = getEnemyCenter()
+      const e = this.getEnemyCenter(enemy)
       const dx = targetX - e.x
       const dy = targetY - e.y
       const dist = Math.hypot(dx, dy)
@@ -239,12 +335,10 @@ export class EnemyAISystem {
       return Math.hypot(dx, dy) > leash
     }
 
-    // If the player is outside the bat's "territory" (leash radius), don't allow re-aggro loops.
-    // This prevents chase/return flip-flop when aggroRadius > leashRadius.
     const playerWithinLeashTerritory = () => {
       const leash = enemy.getLeashRadius()
       if (!(leash > 0)) return true
-      const p = getPlayerCenter()
+      const p = this.getPlayerCenter()
       return Math.hypot(p.x - enemy.spawnX, p.y - enemy.spawnY) <= leash
     }
 
@@ -254,12 +348,9 @@ export class EnemyAISystem {
         clearPath()
       }
 
-      const e0 = getEnemyCenter()
+      const e0 = this.getEnemyCenter(enemy)
       const lineOfSight = this.hasLineOfSight?.(e0.x, e0.y, targetX, targetY) ?? true
 
-      // Even when LOS is true, we can still get "stuck" against collision (for example corners, tight gaps,
-      // or LOS false-positives). Track progress and fall back to pathing if we haven't closed distance
-      // for a short window.
       let forcePath = false
       if (lineOfSight) {
         if (pathState.mode !== 'direct') {
@@ -310,7 +401,7 @@ export class EnemyAISystem {
       pathState.lastTarget = { x: targetX, y: targetY }
 
       let target = pathState.points[pathState.index]
-      const e = getEnemyCenter()
+      const e = this.getEnemyCenter(enemy)
       const startIdx = pathState.index
       while (target) {
         const dist = Math.hypot(target.x - e.x, target.y - e.y)
@@ -359,15 +450,22 @@ export class EnemyAISystem {
       handlers: {
         hover: {
           onUpdate: (c, now) => {
-            if (shouldLeash()) {
-              c.returningFromLeash = true
-              fsm.transition('return', c, now)
-              return
-            }
             const aggro = enemy.getAggroRadius() || 260
             const { dist } = getPlayerVec()
-            if (dist < aggro && playerWithinLeashTerritory() && now >= c.aggroCooldownUntil) {
-              fsm.transition('chase', c, now)
+            const next = resolveBatTransition({
+              mode: 'hover',
+              now,
+              distToPlayer: dist,
+              aggroRadius: aggro,
+              shouldLeash: shouldLeash(),
+              playerWithinLeashTerritory: playerWithinLeashTerritory(),
+              aggroCooldownUntil: c.aggroCooldownUntil,
+              returningFromLeash: c.returningFromLeash,
+            })
+            c.aggroCooldownUntil = next.aggroCooldownUntil
+            c.returningFromLeash = next.returningFromLeash
+            if (next.nextMode !== 'hover') {
+              fsm.transition(next.nextMode, c, now)
               return
             }
             hover(now)
@@ -375,35 +473,62 @@ export class EnemyAISystem {
         },
         chase: {
           onUpdate: (c, now, dt) => {
-            if (shouldLeash()) {
-              c.returningFromLeash = true
-              fsm.transition('return', c, now)
-              return
-            }
             const aggro = enemy.getAggroRadius() || 260
-            const { dist } = getPlayerVec()
-            if (dist > aggro * 1.15) {
-              // Lost the player: return home (don't hover where we lost aggro).
-              c.returningFromLeash = false
-              c.aggroCooldownUntil = Math.max(c.aggroCooldownUntil, now + AGGRO_COOLDOWN_MS)
-              fsm.transition('return', c, now)
+            const { dx, dy, dist } = getPlayerVec()
+
+            const next = resolveBatTransition({
+              mode: 'chase',
+              now,
+              distToPlayer: dist,
+              aggroRadius: aggro,
+              shouldLeash: shouldLeash(),
+              playerWithinLeashTerritory: playerWithinLeashTerritory(),
+              aggroCooldownUntil: c.aggroCooldownUntil,
+              returningFromLeash: c.returningFromLeash,
+            })
+            c.aggroCooldownUntil = next.aggroCooldownUntil
+            c.returningFromLeash = next.returningFromLeash
+            if (next.nextMode !== 'chase') {
+              fsm.transition(next.nextMode, c, now)
               return
             }
-            const p = getPlayerCenter()
+
+            if (this.tryBeginAttack(enemy, c.attack, now, dx, dy)) return
+            if (isAttackLocked(c.attack)) {
+              enemy.setVelocity(0, 0)
+              this.tickAttack(enemy, c.attack, now)
+              return
+            }
+
+            const p = this.getPlayerCenter()
             followTarget(p.x, p.y, 'player', now, dt)
           },
         },
         return: {
           onUpdate: (c, now, dt) => {
-            // If we're returning due to deaggro (not hard-leashed), re-aggro after cooldown when the
-            // player comes back into range (and is within the bat's leash territory).
-            if (!c.returningFromLeash && !shouldLeash() && now >= c.aggroCooldownUntil && playerWithinLeashTerritory()) {
-              const aggro = enemy.getAggroRadius() || 260
-              const { dist } = getPlayerVec()
-              if (dist < aggro) {
-                fsm.transition('chase', c, now)
-                return
-              }
+            if (isAttackLocked(c.attack)) {
+              enemy.setVelocity(0, 0)
+              this.tickAttack(enemy, c.attack, now)
+              return
+            }
+
+            const aggro = enemy.getAggroRadius() || 260
+            const { dist } = getPlayerVec()
+            const next = resolveBatTransition({
+              mode: 'return',
+              now,
+              distToPlayer: dist,
+              aggroRadius: aggro,
+              shouldLeash: shouldLeash(),
+              playerWithinLeashTerritory: playerWithinLeashTerritory(),
+              aggroCooldownUntil: c.aggroCooldownUntil,
+              returningFromLeash: c.returningFromLeash,
+            })
+            c.aggroCooldownUntil = next.aggroCooldownUntil
+            c.returningFromLeash = next.returningFromLeash
+            if (next.nextMode === 'chase') {
+              fsm.transition('chase', c, now)
+              return
             }
 
             const dx = enemy.spawnX - enemy.x
@@ -420,29 +545,49 @@ export class EnemyAISystem {
         hitstun: {
           onUpdate: (c, now) => {
             if (now < c.hitstunUntil) return
-            if (shouldLeash()) {
-              c.returningFromLeash = true
-              fsm.transition('return', c, now)
-              return
-            }
             const aggro = enemy.getAggroRadius() || 260
             const { dist } = getPlayerVec()
-            if (dist < aggro && playerWithinLeashTerritory() && now >= c.aggroCooldownUntil) {
-              fsm.transition('chase', c, now)
-              return
-            }
-            fsm.transition('return', c, now)
+            const next = resolveBatTransition({
+              mode: 'hitstun',
+              now,
+              distToPlayer: dist,
+              aggroRadius: aggro,
+              shouldLeash: shouldLeash(),
+              playerWithinLeashTerritory: playerWithinLeashTerritory(),
+              aggroCooldownUntil: c.aggroCooldownUntil,
+              returningFromLeash: c.returningFromLeash,
+            })
+            c.aggroCooldownUntil = next.aggroCooldownUntil
+            c.returningFromLeash = next.returningFromLeash
+            fsm.transition(next.nextMode, c, now)
           },
         },
       },
     })
 
     return {
-      update: (now, dt) => fsm.update(ctx, now, dt),
+      update: (now, dt) => {
+        if (enemy.getMoveSpeed() <= 0) {
+          enemy.setVelocity(0, 0)
+          this.cancelAttack(ctx.attack)
+          return
+        }
+        this.tickAttack(enemy, ctx.attack, now)
+        fsm.update(ctx, now, dt)
+      },
       onDamaged: (now) => {
         ctx.hitstunUntil = now + Math.max(0, Math.floor(enemy.getHitstunMs()))
+        ctx.attack.phase = 'ready'
+        ctx.attack.phaseUntil = 0
+        ctx.attack.didStrike = false
         fsm.transition('hitstun', ctx, now)
       },
     }
+  }
+
+  private cancelAttack(attack: AttackState) {
+    attack.phase = 'ready'
+    attack.phaseUntil = 0
+    attack.didStrike = false
   }
 }

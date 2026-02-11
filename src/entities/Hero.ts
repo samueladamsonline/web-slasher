@@ -2,6 +2,7 @@ import * as Phaser from 'phaser'
 import { DEPTH_PLAYER, HERO_H, HERO_W } from '../game/constants'
 import type { Facing } from '../game/types'
 import { StateMachine } from '../game/StateMachine'
+import { heroFrameName, heroWalkFrameNames, type HeroFrameStep } from '../content/heroAtlas'
 
 export type HeroState = 'idle' | 'walk' | 'attack' | 'hurt'
 export type HeroIntent = { vx: number; vy: number; attackPressed: boolean }
@@ -28,7 +29,7 @@ export class Hero extends Phaser.Physics.Arcade.Sprite {
   private hurtUntil = 0
 
   static preload(scene: Phaser.Scene) {
-    scene.load.spritesheet('hero', '/sprites/hero.png', { frameWidth: HERO_W, frameHeight: HERO_H })
+    scene.load.atlas('hero', '/sprites/hero.png', '/sprites/hero.atlas.json')
   }
 
   static ensureAnims(scene: Phaser.Scene) {
@@ -38,21 +39,15 @@ export class Hero extends Phaser.Physics.Arcade.Sprite {
       if (scene.anims.exists(key)) continue
       scene.anims.create({
         key,
-        frames: [
-          { key: 'hero', frame: Hero.frameFor(facing, 0) },
-          { key: 'hero', frame: Hero.frameFor(facing, 1) },
-          { key: 'hero', frame: Hero.frameFor(facing, 2) },
-          { key: 'hero', frame: Hero.frameFor(facing, 1) },
-        ],
+        frames: heroWalkFrameNames(facing).map((frame) => ({ key: 'hero', frame })),
         frameRate: 10,
         repeat: -1,
       })
     }
   }
 
-  static frameFor(facing: Facing, step: 0 | 1 | 2) {
-    const rowByFacing: Record<Facing, number> = { down: 0, up: 1, left: 2, right: 3 }
-    return rowByFacing[facing] * 3 + step
+  static frameFor(facing: Facing, step: HeroFrameStep) {
+    return heroFrameName(facing, step)
   }
 
   constructor(scene: Phaser.Scene, x: number, y: number) {

@@ -1,24 +1,26 @@
 # Web-Slasher Project Notes
 
 ## Overview
-Web-Slasher is a Phaser-based 2D top-down action RPG. The game is organized around a single `GameScene` that wires together entities, world runtime, and gameplay systems. The codebase favors data-driven definitions (maps/items/enemies) and modular systems that can be tested via Playwright.
+Web-Slasher is a Phaser-based 2D top-down action RPG. The codebase favors data-driven definitions (maps/items/enemies), modular systems, and deterministic test coverage (`vitest` + Playwright).
 
 ## High-Level Architecture
 - `src/main.ts` bootstraps Phaser.
-- `src/scenes/GameScene.ts` is the orchestration layer that instantiates entities/systems and handles pause/game-over flows.
+- `src/scenes/GameScene.ts` is the integration layer for core systems.
+- `src/scenes/coordinators/SceneFlowCoordinator.ts` owns start menu, pause/map/inventory/spellbook overlays, dialogue pause, and game-over/respawn flow.
+- `src/scenes/coordinators/SceneDebugCoordinator.ts` owns debug bridge lifecycle (`window.__dbg`).
 - `src/game/MapRuntime.ts` owns map loading, collisions, warps, and enemy spawns.
 - Entities live in `src/entities/*` (Hero, Enemy, enemy defs).
 - Systems live in `src/systems/*` (AI, combat, health, inventory, pickups, interaction, save, etc).
 - UI components live in `src/ui/*`.
 
 ## Core Systems
-- `EnemyAISystem`: finite state machines per enemy. Bats use path-following when line-of-sight is blocked; slimes wander/leash.
+- `EnemyAISystem`: finite state machines per enemy. Bats use path-following when LOS is blocked and a deaggro cooldown; slimes wander/leash. Enemy melee now uses a parity model with windup/active/recovery/cooldown and data-defined hitboxes/knockback.
 - `CombatSystem`: handles player attacks and hit detection.
 - `SpellSystem`: handles spell casting and projectile spells (data-driven from `src/content/spells.ts`), including optional on-hit effects (for example slow).
 - `StatusEffectSystem`: updates enemy status-effect visuals (for example a slow icon) and keeps those indicators attached to enemies.
 - `SpellbookUI`: overlay for viewing available spells and assigning spell hotkeys.
 - `SpellSlotUI`: bottom-right HUD slot showing the currently selected spell (icon + name).
-- `PlayerHealthSystem`: damage, invulnerability, and health UI. Touch damage uses overlap + swept-circle check for tunneling.
+- `PlayerHealthSystem`: damage, invulnerability, and health UI. Damage intake is strike-driven (`tryApplyEnemyStrike`) instead of raw overlap touch damage.
 - `InventorySystem`: equipment, weapons, and bag.
 - `InventoryUI`: Diablo-2-ish overlay for EQUIPPED + STASH; the right-side Details panel shows hovered item stats, and shows aggregated equipped stats when nothing is hovered.
 - `PickupSystem` + `LootSystem`: drops and auto-pickups.
@@ -27,7 +29,7 @@ Web-Slasher is a Phaser-based 2D top-down action RPG. The game is organized arou
 - `SoundSystem`: listens to game events and plays SFX (attack swing, hits, pickups, UI open/close).
 - `MapRuntime`: tilemap collision, warps, LOS checks, and pathfinding.
 - `Hero` (`src/entities/Hero.ts`): movement/attack/hurt finite state machine. Attacks do not hard-lock movement; if movement input is held, the hero keeps moving while the attack timing still runs.
-- `HeroGear` (`src/entities/HeroGear.ts`): modular equipped visuals (weapon/shield/armor) rendered as separate sprites attached to the hero each frame; weapon swing is animated separately to avoid combinatorial hero sprites.
+- Hero animation frames are atlas-metadata driven (`public/sprites/hero.atlas.json`, `src/content/heroAtlas.ts`) using named frames, not hardcoded row/column math.
 
 ## Player Stats
 Player power is derived from equipment via `InventorySystem.getPlayerStats()`:
@@ -49,19 +51,21 @@ Invalidation rules:
 - If the currently selected spell becomes unavailable, selection becomes "No Spell" (no auto-picking a replacement).
 - Hotkeys and the selected spell persist via `SaveSystem` / localStorage.
 
-`GameScene` is the integration point: it applies `moveSpeedMul`, scaled attack timings, and max HP to the hero/combat/health systems, wires `SpellSystem` to cast the selected spell, and keeps `SpellSlotUI` and `SpellbookUI` in sync with inventory changes.
+`GameScene` is the integration point: it applies `moveSpeedMul`, scaled attack timings, and max HP to hero/combat/health, wires `SpellSystem` casts, and keeps `SpellSlotUI` + `SpellbookUI` in sync with inventory changes while delegating flow/debug concerns to coordinators.
 
 ## Pathfinding
 `src/game/pathfinding.ts` provides A* on the collision grid. `MapRuntime.findPath` wraps this and returns tile + world-point paths. `EnemyAISystem` uses `findPath` and `hasLineOfSight` to chase around walls rather than pushing into them.
 
 ## Collision & Damage
-Arcade physics colliders handle walls. Touch damage is driven by overlap callbacks plus a swept-circle check in `PlayerHealthSystem` to avoid tunneling with fast/small enemies.
+Arcade physics colliders handle world blocking. Enemy damage uses timed melee strike windows (windup/active/recovery) with configurable circular hitboxes; `PlayerHealthSystem` applies invulnerability and knockback when a strike lands.
 
 ## Events
 `src/game/events.ts` defines typed game events (enemy damaged/died, player attacks, pickups collected). Prefer emitting events from gameplay systems and reacting in dedicated systems (for example `SoundSystem`, `LootSystem`) to keep coupling low.
 
 ## Testing
-Playtests run via `npm run playtest` and should be executed after any gameplay changes. Update or add tests when behavior changes.
+- Focused unit tests live under `tests/` and run with `npm run test` (Inventory, Spell helpers, Enemy AI/attack model).
+- Integration playtests run with `npm run playtest`.
+- Build verification runs with `npm run build`.
 
 ## Engineering Guidelines
 - Keep the codebase clean: remove dead or unused code when refactoring.

@@ -14,9 +14,7 @@ type EnemyStats = Pick<
   | 'knockback'
   | 'moveSpeed'
   | 'leashRadius'
-  | 'touchDamage'
-  | 'touchKnockback'
-  | 'touchRadius'
+  | 'attack'
   | 'aggroRadius'
 >
 
@@ -43,9 +41,10 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
       knockback: def.knockback,
       moveSpeed: def.moveSpeed,
       leashRadius: def.leashRadius,
-      touchDamage: def.touchDamage,
-      touchKnockback: def.touchKnockback,
-      touchRadius: def.touchRadius,
+      attack: {
+        ...def.attack,
+        hitbox: { ...def.attack.hitbox },
+      },
       aggroRadius: def.aggroRadius,
     }
 
@@ -92,24 +91,8 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     return this.effects.getMoveSpeedMul(now)
   }
 
-  getTouchDamage() {
-    return this.stats.touchDamage
-  }
-
-  getTouchKnockback() {
-    return this.stats.touchKnockback
-  }
-
-  getTouchRadius() {
-    if (typeof this.stats.touchRadius === 'number' && Number.isFinite(this.stats.touchRadius)) {
-      return Math.max(0, this.stats.touchRadius)
-    }
-    const body = this.body as Phaser.Physics.Arcade.Body | undefined
-    const w = typeof body?.width === 'number' ? body.width : 0
-    const h = typeof body?.height === 'number' ? body.height : 0
-    const r = Math.max(w, h) * 0.5
-    // Small padding so visual contact is more likely to register.
-    return Math.max(8, r + 4)
+  getAttackConfig() {
+    return this.stats.attack
   }
 
   recordPlayerHit(now: number) {
@@ -218,11 +201,11 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     const leashRaw = getTiledNumber(props, 'leashRadius')
     if (typeof leashRaw === 'number') enemy.stats.leashRadius = Math.max(0, leashRaw)
     const touchDmgRaw = getTiledNumber(props, 'touchDamage')
-    if (typeof touchDmgRaw === 'number') enemy.stats.touchDamage = Math.max(0, Math.floor(touchDmgRaw))
+    if (typeof touchDmgRaw === 'number') enemy.stats.attack.damage = Math.max(0, touchDmgRaw)
     const touchKbRaw = getTiledNumber(props, 'touchKnockback')
-    if (typeof touchKbRaw === 'number') enemy.stats.touchKnockback = Math.max(0, touchKbRaw)
+    if (typeof touchKbRaw === 'number') enemy.stats.attack.knockback = Math.max(0, touchKbRaw)
     const touchRadiusRaw = getTiledNumber(props, 'touchRadius')
-    if (typeof touchRadiusRaw === 'number') enemy.stats.touchRadius = Math.max(0, touchRadiusRaw)
+    if (typeof touchRadiusRaw === 'number') enemy.stats.attack.hitbox.radius = Math.max(0, touchRadiusRaw)
     const invulnRaw = getTiledNumber(props, 'invulnMs')
     if (typeof invulnRaw === 'number') enemy.stats.invulnMs = Math.max(0, invulnRaw)
     const kbRaw = getTiledNumber(props, 'knockback')

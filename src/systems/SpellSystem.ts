@@ -2,6 +2,7 @@ import * as Phaser from 'phaser'
 import { SPELLS, resolveSpellLevel, spellSpeedPxPerSec, type SpellGrant, type SpellId } from '../content/spells'
 import { Enemy } from '../entities/Enemy'
 import { SpellProjectile } from '../entities/SpellProjectile'
+import { normalizeCardinalDirection } from './spell/castDirection'
 
 export type SpellDebug = { at: number; spellId: SpellId | null; level: number; hits: number }
 
@@ -170,7 +171,7 @@ export class SpellSystem {
     const until = this.cooldownUntil.get(spellId) ?? -Infinity
     if (now < until) return false
 
-    const dir = normalizeCardinalDir(dirRaw)
+    const dir = normalizeCardinalDirection(dirRaw)
     if (!dir) return false
 
     const cfg = resolved.cfg
@@ -237,13 +238,4 @@ export class SpellSystem {
     this.worldBoundsHandler = handler
     this.scene.physics.world.on('worldbounds', handler)
   }
-}
-
-function normalizeCardinalDir(dir: { x: number; y: number } | null | undefined): { x: number; y: number } | null {
-  if (!dir) return null
-  const x = typeof dir.x === 'number' && Number.isFinite(dir.x) ? dir.x : 0
-  const y = typeof dir.y === 'number' && Number.isFinite(dir.y) ? dir.y : 0
-  if (Math.abs(x) < 0.0001 && Math.abs(y) < 0.0001) return null
-  if (Math.abs(x) >= Math.abs(y)) return { x: x < 0 ? -1 : 1, y: 0 }
-  return { x: 0, y: y < 0 ? -1 : 1 }
 }

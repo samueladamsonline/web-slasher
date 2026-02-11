@@ -13,7 +13,7 @@ import { SoundSystem } from '../systems/SoundSystem'
 import { CombatSystem } from '../systems/CombatSystem'
 import { SpellSystem } from '../systems/SpellSystem'
 import { StatusEffectSystem } from '../systems/StatusEffectSystem'
-import { SaveSystem, type SaveDataV1 } from '../systems/SaveSystem'
+import { SaveSystem } from '../systems/SaveSystem'
 import { HeartsUI } from '../ui/HeartsUI'
 import { DialogueUI } from '../ui/DialogueUI'
 import { InteractPromptUI } from '../ui/InteractPromptUI'
@@ -24,6 +24,8 @@ import { InventoryUI } from '../ui/InventoryUI'
 import { SpellSlotUI } from '../ui/SpellSlotUI'
 import { SpellbookUI } from '../ui/SpellbookUI'
 import { WorldState } from '../game/WorldState'
+import { SceneDebugCoordinator } from './coordinators/SceneDebugCoordinator'
+import { SceneFlowCoordinator } from './coordinators/SceneFlowCoordinator'
 
 export class GameScene extends Phaser.Scene {
   private controls!: InputSystem
@@ -56,20 +58,8 @@ export class GameScene extends Phaser.Scene {
   private spellSlotUI!: SpellSlotUI
   private spellbookUI!: SpellbookUI
 
-  private startMenu = true
-  private startLoading = true
-  private startBusy = false
-  private startBusyMessage: string | null = null
-  private startCanContinue = false
-  private startError: string | null = null
-  private startLoadedSave: SaveDataV1 | null = null
-  private startToken = 0
-
-  private paused = false
-  private pauseMode: 'pause' | 'inventory' | 'map' | 'spellbook' = 'pause'
-  private gameOver = false
-  private dialoguePaused = false
-  private checkpoint: { mapKey: 'overworld' | 'cave'; spawnName: string } = { mapKey: 'overworld', spawnName: 'player_spawn' }
+  private flow!: SceneFlowCoordinator
+  private debug!: SceneDebugCoordinator
 
   constructor() {
     super('game')
@@ -95,8 +85,6 @@ export class GameScene extends Phaser.Scene {
   }
 
   create() {
-    // If this Scene is restarted, `create()` runs again on the same instance.
-    // Reset cleanup guard and install a fresh shutdown hook.
     this.cleanedUp = false
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.onShutdown, this)
     this.events.once(Phaser.Scenes.Events.DESTROY, this.onShutdown, this)
@@ -121,35 +109,37 @@ export class GameScene extends Phaser.Scene {
     this.inventoryUI = new InventoryUI(this, this.inventory)
     this.spellbookUI = new SpellbookUI(this, this.inventory)
     this.spellbookUI.hide()
+
     this.save = new SaveSystem({
       inventory: this.inventory,
       world: this.world,
-      getCheckpoint: () => ({ mapKey: this.checkpoint.mapKey, spawnName: this.checkpoint.spawnName }),
+      getCheckpoint: () => this.flow?.getCheckpoint?.() ?? { mapKey: 'overworld', spawnName: 'player_spawn' },
     })
-    // Only start saving once the player starts a new game or continues.
     this.save.setEnabled(false)
+
     this.inventory.setOnChanged(() => {
       this.save.requestSave()
-      if (this.inventoryUI?.isVisible?.()) this.inventoryUI.refresh()
-      if (this.spellbookUI?.isVisible?.()) this.spellbookUI.refresh()
+      if (this.inventoryUI.isVisible()) this.inventoryUI.refresh()
+      if (this.spellbookUI.isVisible()) this.spellbookUI.refresh()
       const stats = this.inventory.getPlayerStats()
-      this.health?.setMaxHp?.(this.baseMaxHp + stats.maxHpBonus)
-      this.spellSlotUI?.setSpell?.(stats.selectedSpell)
+      this.health?.setMaxHp(this.baseMaxHp + stats.maxHpBonus)
+      this.spellSlotUI.setSpell(stats.selectedSpell)
     })
     this.world.setOnChanged(() => this.save.requestSave())
 
     this.mapRuntime = new MapRuntime(this, this.hero, {
       onChanged: () => {
-        this.health?.onMapChanged?.()
-        this.spells?.onMapChanged?.()
-        this.updateCheckpoint()
+        this.health.onMapChanged()
+        this.spells.onMapChanged()
+        this.flow.syncCheckpointFromRuntime()
         this.mapNameUI.set(this.mapRuntime.mapKey)
-        this.minimap?.onMapChanged?.()
-        this.save?.requestSave?.()
-        this.refreshDbg()
+        this.minimap.onMapChanged()
+        this.save.requestSave()
+        this.debug.refresh()
       },
-      canWarp: () => (typeof this.health?.canWarp === 'function' ? this.health.canWarp() : true),
+      canWarp: () => this.health.canWarp(),
     })
+
     const debugHitbox = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('debugHitbox')
     this.combat = new CombatSystem(this, this.hero, {
       getFacing: () => this.hero.getFacing(),
@@ -159,6 +149,7 @@ export class GameScene extends Phaser.Scene {
       debugHitbox,
       hasLineOfSight: (fromX, fromY, toX, toY) => this.mapRuntime.hasLineOfSight(fromX, fromY, toX, toY),
     })
+
     this.spells = new SpellSystem(this, this.hero, () => this.mapRuntime.enemies, {
       getSelectedSpell: () => this.inventory.getSelectedSpell(),
       getCollisionLayer: () => this.mapRuntime.getCollisionLayer(),
@@ -169,21 +160,27 @@ export class GameScene extends Phaser.Scene {
     this.health.onMapChanged()
 
     this.pickups = new PickupSystem(this, this.hero, { inventory: this.inventory, health: this.health, world: this.world })
-    // LootSystem listens for enemy death events and spawns drops via PickupSystem.
     this.loot = new LootSystem(this, this.pickups)
+
     this.interactions = new InteractionSystem(
       this,
       this.hero,
       { inventory: this.inventory, world: this.world, dialogue: this.dialogueUI, prompt: this.promptUI },
-      { onDialogueOpen: () => this.pauseForDialogue(), onDialogueClose: () => this.resumeFromDialogue() },
+      {
+        onDialogueOpen: () => this.flow.pauseForDialogue(),
+        onDialogueClose: () => this.flow.resumeFromDialogue(),
+      },
     )
+
     this.mapRuntime.setPickupSystem(this.pickups)
     this.mapRuntime.setInteractionSystem(this.interactions)
 
     this.enemyAI = new EnemyAISystem(this, this.hero, () => this.mapRuntime.enemies, {
       findPath: (fromX, fromY, toX, toY) => this.mapRuntime.findPath(fromX, fromY, toX, toY),
       hasLineOfSight: (fromX, fromY, toX, toY) => this.mapRuntime.hasLineOfSight(fromX, fromY, toX, toY),
+      onEnemyStrike: (strike) => this.health.tryApplyEnemyStrike(strike),
     })
+
     this.statusFx = new StatusEffectSystem(this, () => this.mapRuntime.enemies)
 
     this.minimap = new MinimapUI(this, this.hero, {
@@ -197,118 +194,92 @@ export class GameScene extends Phaser.Scene {
       },
     })
 
-    // Start menu (New Game / Continue) is shown before loading a map.
-    this.mapNameUI.set(null)
-    this.openStartMenu()
-    void this.refreshStartMenuState()
+    this.debug = new SceneDebugCoordinator(() => this.buildDebugState())
 
-    this.refreshDbg()
+    this.flow = new SceneFlowCoordinator({
+      scene: this,
+      hero: this.hero,
+      mapRuntime: this.mapRuntime,
+      world: this.world,
+      inventory: this.inventory,
+      health: this.health,
+      save: this.save,
+      sfx: this.sfx,
+      overlay: this.overlay,
+      minimap: this.minimap,
+      inventoryUI: this.inventoryUI,
+      spellSlotUI: this.spellSlotUI,
+      spellbookUI: this.spellbookUI,
+      refreshDbg: () => this.debug.refresh(),
+    })
+
+    this.mapNameUI.set(null)
+    this.flow.openStartMenu()
+    void this.flow.refreshStartMenuState()
+
+    this.debug.refresh()
   }
 
   private onShutdown() {
     if (this.cleanedUp) return
     this.cleanedUp = true
 
-    // Stop autosaves and detach callbacks so we don't keep touching LocalStorage after shutdown.
-    this.save?.setEnabled?.(false)
-    this.inventory?.setOnChanged?.(undefined)
-    this.world?.setOnChanged?.(undefined)
+    this.save?.setEnabled(false)
+    this.inventory?.setOnChanged(undefined)
+    this.world?.setOnChanged(undefined)
 
-    this.enemyAI?.destroy?.()
-    this.loot?.destroy?.()
-    this.health?.destroy?.()
-    this.pickups?.clear?.()
-    this.interactions?.destroy?.()
-    this.mapRuntime?.destroy?.()
-    this.sfx?.destroy?.()
-    this.spells?.destroy?.()
-    this.statusFx?.destroy?.()
+    this.enemyAI?.destroy()
+    this.loot?.destroy()
+    this.health?.destroy()
+    this.pickups?.clear()
+    this.interactions?.destroy()
+    this.mapRuntime?.destroy()
+    this.sfx?.destroy()
+    this.spells?.destroy()
+    this.statusFx?.destroy()
 
-    this.minimap?.destroy?.()
-    this.inventoryUI?.destroy?.()
-    this.spellSlotUI?.destroy?.()
-    this.spellbookUI?.destroy?.()
-    this.mapNameUI?.destroy?.()
-    this.dialogueUI?.destroy?.()
-    this.promptUI?.destroy?.()
-    this.overlay?.destroy?.()
+    this.minimap?.destroy()
+    this.inventoryUI?.destroy()
+    this.spellSlotUI?.destroy()
+    this.spellbookUI?.destroy()
+    this.mapNameUI?.destroy()
+    this.dialogueUI?.destroy()
+    this.promptUI?.destroy()
+    this.overlay?.destroy()
 
-    // Avoid leaking references to dead objects into tests/devtools between restarts.
-    if (typeof window !== 'undefined') {
-      try {
-        delete (window as any).__dbg
-      } catch {
-        ;(window as any).__dbg = undefined
-      }
-    }
+    this.debug?.clear?.()
   }
 
   update(_time: number, delta: number) {
-    this.minimap?.update?.()
+    this.minimap.update()
 
-    if (this.startMenu) {
-      if (this.startBusy) return
-      if (this.controls.justPressed('newGame')) {
-        void this.startNewGame()
-        return
-      }
-      if (this.startLoading) return
-      if (this.controls.justPressed('confirm')) {
-        if (this.startCanContinue) void this.continueGame()
-        else void this.startNewGame()
-        return
-      }
+    if (this.flow.isStartMenu()) {
+      void this.flow.handleStartMenuInput(this.controls)
       return
     }
 
-    if (this.gameOver) {
-      if (this.controls.justPressed('confirm')) this.respawn()
-      return
-    }
+    if (this.flow.handleGameOverInput(this.controls)) return
 
     const interactPressed = this.controls.justPressed('interact')
-    if (!this.paused) this.interactions.update()
-    if (interactPressed && (!this.paused || this.interactions.isDialogueOpen())) this.interactions.tryInteract()
+    if (!this.flow.isPaused()) this.interactions.update()
+    if (interactPressed && (!this.flow.isPaused() || this.interactions.isDialogueOpen())) this.interactions.tryInteract()
     if (this.interactions.isDialogueOpen()) return
 
-    if (this.controls.justPressed('pause')) {
-      if (this.paused) this.setPaused(false)
-      else this.setPaused(true, 'pause')
-      this.refreshDbg()
-    }
+    if (this.flow.handlePauseShortcuts(this.controls)) this.debug.refresh()
 
-    if (this.controls.justPressed('inventory')) {
-      if (this.paused && this.pauseMode === 'inventory') this.setPaused(false)
-      else this.setPaused(true, 'inventory')
-      this.refreshDbg()
-    }
-
-    if (this.controls.justPressed('map')) {
-      if (this.paused && this.pauseMode === 'map') this.setPaused(false)
-      else this.setPaused(true, 'map')
-      this.refreshDbg()
-    }
-
-    if (this.controls.justPressed('spellbook')) {
-      if (this.paused && this.pauseMode === 'spellbook') this.setPaused(false)
-      else this.setPaused(true, 'spellbook')
-      this.refreshDbg()
-    }
-
-    if (this.paused) {
-      if (this.pauseMode === 'spellbook') {
-        if (this.controls.justPressed('spell1')) this.spellbookUI?.onHotkeyPressed?.(0)
-        if (this.controls.justPressed('spell2')) this.spellbookUI?.onHotkeyPressed?.(1)
-        if (this.controls.justPressed('spell3')) this.spellbookUI?.onHotkeyPressed?.(2)
-        if (this.controls.justPressed('spell4')) this.spellbookUI?.onHotkeyPressed?.(3)
-        if (this.controls.justPressed('spell5')) this.spellbookUI?.onHotkeyPressed?.(4)
+    if (this.flow.isPaused()) {
+      if (this.flow.getPauseMode() === 'spellbook') {
+        if (this.controls.justPressed('spell1')) this.spellbookUI.onHotkeyPressed(0)
+        if (this.controls.justPressed('spell2')) this.spellbookUI.onHotkeyPressed(1)
+        if (this.controls.justPressed('spell3')) this.spellbookUI.onHotkeyPressed(2)
+        if (this.controls.justPressed('spell4')) this.spellbookUI.onHotkeyPressed(3)
+        if (this.controls.justPressed('spell5')) this.spellbookUI.onHotkeyPressed(4)
       }
       return
     }
 
     const { vx, vy } = this.controls.getMoveAxes()
 
-    // Spell hotkeys: pressing 1-5 selects the spell assigned to that slot.
     if (this.controls.justPressed('spell1')) this.inventory.selectSpellHotkey(0)
     if (this.controls.justPressed('spell2')) this.inventory.selectSpellHotkey(1)
     if (this.controls.justPressed('spell3')) this.inventory.selectSpellHotkey(2)
@@ -328,23 +299,22 @@ export class GameScene extends Phaser.Scene {
           recoveryMs: Math.max(0, Math.floor(weapon.timings.recoveryMs / stats.attackSpeedMul)),
         }
       : undefined
+
     const res = this.hero.updateFsm(
       this.time.now,
       delta,
       { vx, vy, attackPressed },
       { moveSpeed: this.speed * stats.moveSpeedMul, attackTiming: scaledAttackTiming },
     )
-    // Keep debug attacks queued until an attack actually starts, so tests don't flake on timing/locks.
+
     if (!weapon) this.debugAttackQueued = false
     else if (res.didStartAttack) this.debugAttackQueued = false
     if (res.didStrike) this.combat.tryAttack()
 
-    // Spells are independent of melee weapons; helmets grant the spellbook.
     const castDir = this.controls.getCastDir()
     const castDirRaw = castDir ?? this.debugCastQueuedDir
     if (castDirRaw && stats.selectedSpell) {
-      const didCast = this.spells?.tryCastSelected?.(this.time.now, castDirRaw) ?? false
-      // Keep debug casts queued until they actually cast, so tests don't flake on cooldown timing.
+      const didCast = this.spells.tryCastSelected(this.time.now, castDirRaw)
       if (!castDir && this.debugCastQueuedDir) {
         if (!stats.selectedSpell) this.debugCastQueuedDir = null
         else if (didCast) this.debugCastQueuedDir = null
@@ -354,11 +324,13 @@ export class GameScene extends Phaser.Scene {
     this.health.setMaxHp(this.baseMaxHp + stats.maxHpBonus)
     this.health.update()
     this.pickups.update()
+
     if (this.health.getHp() <= 0) {
-      this.triggerGameOver()
-      this.refreshDbg()
+      this.flow.triggerGameOver()
+      this.debug.refresh()
       return
     }
+
     this.enemyAI.update(this.time.now, delta)
     this.statusFx.update(this.time.now)
   }
@@ -382,9 +354,9 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private refreshDbg() {
+  private buildDebugState() {
     const rawEnemies = this.mapRuntime.enemies?.getChildren?.() ?? []
-    ;(window as any).__dbg = {
+    return {
       player: this.hero,
       heroState: this.hero.getState(),
       mapKey: this.mapRuntime.mapKey,
@@ -393,22 +365,22 @@ export class GameScene extends Phaser.Scene {
       setFacing: (facing: string) => {
         if (facing === 'up' || facing === 'down' || facing === 'left' || facing === 'right') this.hero.setFacing(facing)
       },
-      hasSave: () => this.save?.hasSave?.() ?? false,
-      saveNow: () => this.save?.saveNow?.() ?? false,
-      clearSave: () => this.save?.clear?.(),
-      getLastAttack: () => this.combat?.getDebug?.() ?? { at: 0, hits: 0 },
+      hasSave: () => this.save.hasSave(),
+      saveNow: () => this.save.saveNow(),
+      clearSave: () => this.save.clear(),
+      getLastAttack: () => this.combat.getDebug(),
       tryAttack: () => {
         this.debugAttackQueued = true
       },
-      getLastCast: () => this.spells?.getDebug?.() ?? { at: 0, spellId: null, level: 0, hits: 0 },
-      getProjectiles: () => this.spells?.getProjectilesDebug?.() ?? [],
+      getLastCast: () => this.spells.getDebug(),
+      getProjectiles: () => this.spells.getProjectilesDebug(),
       tryCast: (dir: string = 'right') => {
         const d = dir === 'left' ? { x: -1, y: 0 } : dir === 'up' ? { x: 0, y: -1 } : dir === 'down' ? { x: 0, y: 1 } : { x: 1, y: 0 }
         this.debugCastQueuedDir = d
       },
-      tryInteract: () => this.interactions?.tryInteract?.(),
+      tryInteract: () => this.interactions.tryInteract(),
       equipWeapon: (id: string) => {
-        if (id === 'sword' || id === 'greatsword') return this.inventory?.equipWeapon?.(id)
+        if (id === 'sword' || id === 'greatsword') return this.inventory.equipWeapon(id)
         return false
       },
       moveInvItem: (from: any, to: any) => {
@@ -419,13 +391,13 @@ export class GameScene extends Phaser.Scene {
           return false
         }
         if (!isSlot(from) || !isSlot(to)) return { ok: false, error: 'bad-args' }
-        return this.inventory?.moveItem?.(from, to) ?? { ok: false, error: 'no-inventory' }
+        return this.inventory.moveItem(from, to)
       },
-      getPlayerHp: () => this.health?.getHp?.() ?? null,
-      getPlayerMaxHp: () => this.health?.getMaxHp?.() ?? null,
-      setPlayerHp: (hp: number) => this.health?.setHp?.(hp),
-      getInventory: () => this.inventory?.snapshot?.() ?? null,
-      getDialogue: () => ({ open: this.interactions?.isDialogueOpen?.() ?? false, text: this.interactions?.getDialogueText?.() ?? '' }),
+      getPlayerHp: () => this.health.getHp(),
+      getPlayerMaxHp: () => this.health.getMaxHp(),
+      setPlayerHp: (hp: number) => this.health.setHp(hp),
+      getInventory: () => this.inventory.snapshot(),
+      getDialogue: () => ({ open: this.interactions.isDialogueOpen(), text: this.interactions.getDialogueText() }),
       enemyCount: rawEnemies.length,
       enemyActives: rawEnemies.map((e: any) => e?.active ?? null),
       getEnemies: () => {
@@ -441,257 +413,20 @@ export class GameScene extends Phaser.Scene {
               : { kind: null, x: e.x, y: e.y, bx, by, hp: null }
           })
       },
-      getGameState: () => ({
-        startMenu: this.startMenu,
-        startLoading: this.startLoading,
-        startCanContinue: this.startCanContinue,
-        startBusy: this.startBusy,
-        paused: this.paused,
-        pauseMode: this.pauseMode,
-        gameOver: this.gameOver,
-        dialogueOpen: this.interactions?.isDialogueOpen?.() ?? false,
-        checkpoint: { ...this.checkpoint },
-      }),
-      togglePause: () => (this.paused ? this.setPaused(false) : this.setPaused(true, 'pause')),
-      respawn: () => this.respawn(),
+      getGameState: () => ({ ...this.flow.getState(), dialogueOpen: this.interactions.isDialogueOpen() }),
+      togglePause: () => {
+        if (this.flow.isPaused()) this.flow.setPaused(false)
+        else this.flow.setPaused(true, 'pause')
+        this.debug.refresh()
+      },
+      respawn: () => {
+        this.flow.respawn()
+        this.debug.refresh()
+      },
       depths: {
         ground: this.mapRuntime.groundDepth,
         player: this.hero.depth,
       },
     }
-  }
-
-  private updateCheckpoint() {
-    const mk = this.mapRuntime.mapKey
-    const sn = this.mapRuntime.spawnName
-    if (mk && typeof sn === 'string' && sn) this.checkpoint = { mapKey: mk, spawnName: sn }
-  }
-
-  private setPaused(paused: boolean, mode: 'pause' | 'inventory' | 'map' | 'spellbook' = this.pauseMode) {
-    if (this.paused === paused && this.pauseMode === mode) return
-    const wasPaused = this.paused
-    this.paused = paused
-    this.pauseMode = mode
-
-    if (!wasPaused && this.paused) this.sfx?.playUiOpen?.()
-    if (wasPaused && !this.paused) this.sfx?.playUiClose?.()
-
-    if (this.paused) {
-      this.hero.setVelocity(0, 0)
-      this.physics.world.pause()
-      this.anims.pauseAll()
-
-      this.minimap?.setMiniVisible?.(false)
-      this.minimap?.setMapVisible?.(false)
-      this.inventoryUI?.hide?.()
-      this.spellSlotUI?.setVisible?.(false)
-      this.spellbookUI?.hide?.()
-
-      if (this.pauseMode === 'map') {
-        this.overlay.hide()
-        this.minimap?.setMapVisible?.(true)
-      } else if (this.pauseMode === 'inventory') {
-        this.overlay.hide()
-        this.inventoryUI?.show?.()
-      } else if (this.pauseMode === 'spellbook') {
-        this.overlay.hide()
-        this.spellbookUI?.show?.()
-      } else {
-        this.minimap?.setMapVisible?.(false)
-        this.inventoryUI?.hide?.()
-        this.overlay.showPause(['ESC: Resume', 'I: Inventory', 'F: Spellbook', 'M: Map'])
-      }
-    } else {
-      // Dialogue may have paused the world separately.
-      if (!this.dialoguePaused) {
-        this.physics.world.resume()
-        this.anims.resumeAll()
-      }
-      this.overlay.hide()
-      this.minimap?.setMapVisible?.(false)
-      this.minimap?.setMiniVisible?.(true)
-      this.inventoryUI?.hide?.()
-      this.spellSlotUI?.setVisible?.(true)
-      this.spellbookUI?.hide?.()
-    }
-  }
-
-  private pauseForDialogue() {
-    if (this.dialoguePaused) return
-    if (this.paused) return
-    if (this.gameOver) return
-    this.dialoguePaused = true
-    this.hero.setVelocity(0, 0)
-    this.physics.world.pause()
-    this.anims.pauseAll()
-  }
-
-  private resumeFromDialogue() {
-    if (!this.dialoguePaused) return
-    this.dialoguePaused = false
-    if (this.paused) return
-    if (this.gameOver) return
-    this.physics.world.resume()
-    this.anims.resumeAll()
-  }
-
-  private triggerGameOver() {
-    if (this.gameOver) return
-    this.gameOver = true
-    this.paused = false
-    this.pauseMode = 'pause'
-    this.dialoguePaused = false
-
-    this.hero.setVelocity(0, 0)
-    this.physics.world.pause()
-    this.anims.pauseAll()
-    this.inventoryUI?.hide?.()
-    this.spellSlotUI?.setVisible?.(false)
-    this.spellbookUI?.hide?.()
-    this.overlay.showGameOver(['Press ENTER to respawn at last checkpoint.'])
-  }
-
-  private respawn() {
-    if (!this.gameOver) return
-    this.gameOver = false
-
-    this.health.reset()
-    this.physics.world.resume()
-    this.anims.resumeAll()
-    this.overlay.hide()
-
-    this.mapRuntime.load(this.checkpoint.mapKey, this.checkpoint.spawnName)
-    this.updateCheckpoint()
-    this.mapNameUI.set(this.mapRuntime.mapKey)
-    this.refreshDbg()
-  }
-
-  private async refreshStartMenuState() {
-    const token = ++this.startToken
-    this.startLoading = true
-    this.startError = null
-    this.startCanContinue = false
-    this.startLoadedSave = null
-    this.openStartMenu()
-
-    const res = await this.save.load()
-    if (token !== this.startToken) return
-    if (!this.startMenu) return
-
-    this.startLoading = false
-    this.startError = res.status === 'error' ? res.error : null
-    this.startCanContinue = res.status === 'ok'
-    this.startLoadedSave = res.status === 'ok' ? res.data : null
-    this.openStartMenu()
-  }
-
-  private openStartMenu() {
-    this.startMenu = true
-    this.paused = false
-    this.pauseMode = 'pause'
-    this.gameOver = false
-    this.dialoguePaused = false
-    this.hero.setVelocity(0, 0)
-    this.physics.world.pause()
-    this.anims.pauseAll()
-    this.minimap?.setMiniVisible?.(false)
-    this.minimap?.setMapVisible?.(false)
-    this.inventoryUI?.hide?.()
-    this.spellSlotUI?.setVisible?.(false)
-    this.spellbookUI?.hide?.()
-
-    const lines: string[] = []
-    if (this.startBusy) {
-      lines.push(this.startBusyMessage ?? 'Working...')
-      lines.push('Please wait.')
-    } else if (this.startLoading) {
-      lines.push('Checking for an existing save...')
-      lines.push('')
-      lines.push('N: New Game')
-    } else if (this.startError) {
-      lines.push('Save data could not be loaded.')
-      lines.push(this.startError)
-      lines.push('')
-      lines.push('N: New Game')
-    } else if (this.startCanContinue) {
-      lines.push('ENTER: Continue')
-      lines.push('N: New Game (clears save)')
-    } else {
-      lines.push('ENTER: New Game')
-    }
-    lines.push('')
-    lines.push('WASD: Move   SPACE: Attack   ARROWS: Cast   F: Spellbook   E: Interact   I: Inventory   M: Map')
-    this.overlay.showStart(lines)
-    this.refreshDbg()
-  }
-
-  private async startNewGame() {
-    const token = ++this.startToken
-    this.startBusy = true
-    this.startBusyMessage = 'Starting new game...'
-    this.openStartMenu()
-
-    await this.save.clear()
-    this.save.setEnabled(false)
-    this.world.clear()
-    this.inventory.reset()
-    this.health.reset()
-
-    this.checkpoint = { mapKey: 'overworld', spawnName: 'player_spawn' }
-    if (token !== this.startToken) return
-    await this.startAtCheckpoint(this.checkpoint)
-  }
-
-  private async continueGame() {
-    const token = ++this.startToken
-    this.startBusy = true
-    this.startBusyMessage = 'Loading save...'
-    this.openStartMenu()
-
-    let data = this.startLoadedSave
-    if (!data) {
-      const res = await this.save.load()
-      if (token !== this.startToken) return
-      if (res.status !== 'ok') {
-        this.startBusy = false
-        this.startBusyMessage = null
-        void this.refreshStartMenuState()
-        this.openStartMenu()
-        return
-      }
-      data = res.data
-    }
-
-    const cp = this.save.apply(data)
-    this.health.reset()
-    this.checkpoint = cp
-    if (token !== this.startToken) return
-    await this.startAtCheckpoint(cp)
-  }
-
-  private async startAtCheckpoint(cp: { mapKey: 'overworld' | 'cave'; spawnName: string }) {
-    this.startMenu = false
-    this.startLoading = false
-    this.startBusy = false
-    this.startBusyMessage = null
-    this.overlay.hide()
-    this.minimap?.setMapVisible?.(false)
-    this.minimap?.setMiniVisible?.(true)
-    this.spellSlotUI?.setVisible?.(true)
-    this.spellbookUI?.hide?.()
-
-    // Load while paused, then resume.
-    this.hero.setVelocity(0, 0)
-    this.physics.world.pause()
-    this.anims.pauseAll()
-
-    this.mapRuntime.load(cp.mapKey, cp.spawnName)
-
-    this.physics.world.resume()
-    this.anims.resumeAll()
-
-    this.save.setEnabled(true)
-    await this.save.saveNow()
-    this.refreshDbg()
   }
 }

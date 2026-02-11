@@ -27,9 +27,21 @@ export type EnemyDef = {
   // Max distance (px) the enemy may roam from its spawn point before returning home.
   // Keeps patrol enemies from drifting into warps or off into weird corners.
   leashRadius?: number
-  touchDamage: number
-  touchKnockback: number
-  // Optional hurtbox radius used for touch damage checks (world px).
+  attack: {
+    damage: number
+    knockback: number
+    cooldownMs: number
+    windupMs: number
+    activeMs: number
+    recoveryMs: number
+    hitbox: {
+      offset: number
+      radius: number
+    }
+  }
+  // Deprecated aliases kept for backward-compatible map overrides.
+  touchDamage?: number
+  touchKnockback?: number
   touchRadius?: number
   aggroRadius?: number
   body: { w: number; h: number; ox: number; oy: number }
@@ -46,8 +58,15 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
     knockback: 220,
     moveSpeed: 55,
     leashRadius: 140,
-    touchDamage: 2,
-    touchKnockback: 260,
+    attack: {
+      damage: 2,
+      knockback: 260,
+      cooldownMs: 900,
+      windupMs: 240,
+      activeMs: 90,
+      recoveryMs: 260,
+      hitbox: { offset: 18, radius: 20 },
+    },
     body: { w: 34, h: 22, ox: (44 - 34) / 2, oy: 34 - 22 - 4 },
     drops: [
       // Guaranteed small reward so combat feels immediately useful.
@@ -64,9 +83,15 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
     knockback: 280,
     moveSpeed: 135,
     leashRadius: 340,
-    touchDamage: 1,
-    touchKnockback: 320,
-    touchRadius: 24,
+    attack: {
+      damage: 1,
+      knockback: 320,
+      cooldownMs: 780,
+      windupMs: 120,
+      activeMs: 85,
+      recoveryMs: 180,
+      hitbox: { offset: 16, radius: 18 },
+    },
     aggroRadius: 260,
     body: { w: 34, h: 18, ox: (64 - 34) / 2, oy: 48 - 18 - 10 },
     drops: [

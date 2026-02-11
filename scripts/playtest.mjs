@@ -1951,11 +1951,10 @@ try {
       // ignore (test-only stabilization)
     }
 
-	    // Touch damage sanity: colliding with an enemy should reduce player hp with invuln.
+	    // Enemy strike sanity: entering melee range should trigger a timed enemy strike, with invuln after hit.
 	    if (slime) {
 	      try {
-	        // Freeze all enemies so we don't accidentally re-trigger touch damage while waiting
-        // for invulnerability to expire.
+	        // Freeze non-target enemies so they do not interfere with the melee strike assertion.
         await page.evaluate(() => {
           const scene = globalThis.__dbg?.player?.scene
           const group = scene?.mapRuntime?.enemies
@@ -1963,7 +1962,7 @@ try {
           for (const e of kids) {
             if (!e?.stats) continue
             if (typeof e.__testPrevSpeed !== 'number') e.__testPrevSpeed = e.stats.moveSpeed
-            e.stats.moveSpeed = 0
+            if (e.kind !== 'slime') e.stats.moveSpeed = 0
             if (typeof e.setVelocity === 'function') e.setVelocity(0, 0)
           }
         })
@@ -1982,10 +1981,11 @@ try {
 
         const hp0 = await getPlayerHp(page)
         await teleportPlayer(page, typeof s0.bx === 'number' ? s0.bx : s0.x, typeof s0.by === 'number' ? s0.by : s0.y)
-        await page.waitForTimeout(320)
+        // Slime strike timing (windup+active) is longer than instant-touch systems.
+        await page.waitForTimeout(520)
         const hp1 = await getPlayerHp(page)
         if (!(typeof hp0 === 'number' && typeof hp1 === 'number')) throw new Error(`hp not numeric; hp0=${hp0} hp1=${hp1}`)
-        if (!(hp1 === hp0 - 2)) throw new Error(`expected hp drop by 2 on contact; hp0=${hp0} hp1=${hp1}`)
+        if (!(hp1 === hp0 - 2)) throw new Error(`expected hp drop by 2 from slime strike; hp0=${hp0} hp1=${hp1}`)
 
         // Immediately collide again; should not drop again due to invuln.
         const enemiesNow1 = await getEnemies(page)
@@ -1997,7 +1997,7 @@ try {
         if (typeof hp2 !== 'number') throw new Error(`hp2 not numeric; hp2=${hp2}`)
         if (hp2 < hp1) throw new Error(`expected invuln to prevent rapid drain; hp1=${hp1} hp2=${hp2}`)
       } catch (e) {
-        errors.push(`expected touch damage + invuln; ${String(e?.message ?? e)}`)
+        errors.push(`expected enemy strike damage + invuln; ${String(e?.message ?? e)}`)
       } finally {
         await page.evaluate(() => {
           const scene = globalThis.__dbg?.player?.scene
@@ -2331,7 +2331,7 @@ try {
     if (!hasSlime || !hasBat) errors.push(`expected slime+bat in cave; got ${JSON.stringify(caveEnemies0)}`)
   }
 
-  // Cave bat has touchDamage=2 override (see cave.json).
+  // Cave bat has attack damage=2 override (via legacy touchDamage map property).
   try {
     // Stabilize before forcing touch: ensure any invuln from overworld combat has expired,
     // and make sure we're not accidentally overlapping an enemy while waiting.
@@ -2347,13 +2347,13 @@ try {
     const hp0 = await getPlayerHp(page)
     if (typeof hp0 !== 'number') throw new Error(`hp0 not numeric; hp0=${hp0}`)
     await teleportPlayer(page, typeof bat.bx === 'number' ? bat.bx : bat.x, typeof bat.by === 'number' ? bat.by : bat.y)
-    await page.waitForTimeout(260)
+    await page.waitForTimeout(520)
     const hp1 = await getPlayerHp(page)
     if (typeof hp1 !== 'number') throw new Error(`hp1 not numeric; hp1=${hp1}`)
     const expected = Math.max(0, hp0 - 2)
-    if (hp1 !== expected) throw new Error(`expected bat touchDamage=2; hp0=${hp0} hp1=${hp1} expected=${expected}`)
+    if (hp1 !== expected) throw new Error(`expected bat strike damage=2; hp0=${hp0} hp1=${hp1} expected=${expected}`)
   } catch (e) {
-    errors.push(`expected touchDamage override; ${String(e?.message ?? e)}`)
+    errors.push(`expected enemy damage override; ${String(e?.message ?? e)}`)
   }
 
   // Stabilize after forced touch tests: ensure invuln has expired and we are not still colliding.
