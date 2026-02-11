@@ -2,7 +2,6 @@ import * as Phaser from 'phaser'
 import { MapRuntime } from '../game/MapRuntime'
 import { Enemy } from '../entities/Enemy'
 import { Hero } from '../entities/Hero'
-import { HeroGear } from '../entities/HeroGear'
 import { EnemyAISystem } from '../systems/EnemyAISystem'
 import { InteractionSystem } from '../systems/InteractionSystem'
 import { InputSystem } from '../systems/InputSystem'
@@ -56,7 +55,6 @@ export class GameScene extends Phaser.Scene {
   private inventoryUI!: InventoryUI
   private spellSlotUI!: SpellSlotUI
   private spellbookUI!: SpellbookUI
-  private heroGear?: HeroGear
 
   private startMenu = true
   private startLoading = true
@@ -120,7 +118,6 @@ export class GameScene extends Phaser.Scene {
 
     this.world = new WorldState()
     this.inventory = new InventorySystem()
-    this.heroGear = new HeroGear(this, this.hero, this.inventory)
     this.inventoryUI = new InventoryUI(this, this.inventory)
     this.spellbookUI = new SpellbookUI(this, this.inventory)
     this.spellbookUI.hide()
@@ -138,8 +135,6 @@ export class GameScene extends Phaser.Scene {
       const stats = this.inventory.getPlayerStats()
       this.health?.setMaxHp?.(this.baseMaxHp + stats.maxHpBonus)
       this.spellSlotUI?.setSpell?.(stats.selectedSpell)
-      // Update visible gear immediately even while the world is paused (inventory open).
-      this.heroGear?.update(false)
     })
     this.world.setOnChanged(() => this.save.requestSave())
 
@@ -237,7 +232,6 @@ export class GameScene extends Phaser.Scene {
     this.dialogueUI?.destroy?.()
     this.promptUI?.destroy?.()
     this.overlay?.destroy?.()
-    this.heroGear?.destroy?.()
 
     // Avoid leaking references to dead objects into tests/devtools between restarts.
     if (typeof window !== 'undefined') {
@@ -340,7 +334,6 @@ export class GameScene extends Phaser.Scene {
       { vx, vy, attackPressed },
       { moveSpeed: this.speed * stats.moveSpeedMul, attackTiming: scaledAttackTiming },
     )
-    this.heroGear?.update(res.didStartAttack)
     // Keep debug attacks queued until an attack actually starts, so tests don't flake on timing/locks.
     if (!weapon) this.debugAttackQueued = false
     else if (res.didStartAttack) this.debugAttackQueued = false

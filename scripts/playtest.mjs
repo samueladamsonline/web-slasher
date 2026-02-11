@@ -701,23 +701,6 @@ try {
 	    if (!hasFrostGloves) throw new Error(`expected starter bag to include gloves_frost; bag=${JSON.stringify(inv0.bag)}`)
 	    const hasFrostShield = inv0.bag.some((s) => s?.id === 'shield_frost')
 	    if (!hasFrostShield) throw new Error(`expected starter bag to include shield_frost; bag=${JSON.stringify(inv0.bag)}`)
-
-	    // Hero gear visuals sanity: weapon + shield should be visible with starter loadout.
-	    const gear0Started = Date.now()
-	    let gear0 = null
-	    while (Date.now() - gear0Started < 1200) {
-	      gear0 = await page.evaluate(() => {
-	        const scene = globalThis.__dbg?.player?.scene
-	        return typeof scene?.heroGear?.getDebug === 'function' ? scene.heroGear.getDebug() : null
-	      })
-	      if (gear0?.weapon?.visible) break
-	      await page.waitForTimeout(40)
-	    }
-	    if (!gear0) throw new Error('expected heroGear to exist (for equipment visuals)')
-	    if (!(gear0.weapon?.visible === true && gear0.weapon.texture === 'sword'))
-	      throw new Error(`expected starter weapon visual=sword; gear0=${JSON.stringify(gear0)}`)
-	    if (!(gear0.shield?.visible === true && gear0.shield.texture === 'item-shield'))
-	      throw new Error(`expected starter shield visual=item-shield; gear0=${JSON.stringify(gear0)}`)
 	
 	    // Spells sanity: gear grants spellbook entries, player binds spells to hotkeys in the spellbook overlay (F),
 	    // then selects them with 1-5 and casts with arrow keys.
@@ -795,13 +778,6 @@ try {
 	        })
 	        if (!equipShieldOk?.ok) throw new Error(`expected equipping shield_frost to succeed; res=${JSON.stringify(equipShieldOk)}`)
 	        await page.waitForTimeout(160)
-
-	        const gearAfterShield = await page.evaluate(() => {
-	          const scene = globalThis.__dbg?.player?.scene
-	          return typeof scene?.heroGear?.getDebug === 'function' ? scene.heroGear.getDebug() : null
-	        })
-	        if (!(gearAfterShield?.shield?.visible === true && gearAfterShield.shield.texture === 'item-shield-frost'))
-	          throw new Error(`expected frost shield visual=item-shield-frost; gear=${JSON.stringify(gearAfterShield)}`)
 	
 	        const hud1 = await page.evaluate(() => {
 	          const scene = globalThis.__dbg?.player?.scene
@@ -1097,14 +1073,6 @@ try {
     if (inv2h.equipment.weapon !== 'greatsword') throw new Error(`expected weapon=greatsword; got ${String(inv2h.equipment.weapon)}`)
     if (inv2h.equipment.shield !== null) throw new Error(`expected shield to be unequipped with 2H; got ${String(inv2h.equipment.shield)}`)
 
-    const gear2h = await page.evaluate(() => {
-      const scene = globalThis.__dbg?.player?.scene
-      return typeof scene?.heroGear?.getDebug === 'function' ? scene.heroGear.getDebug() : null
-    })
-    if (!(gear2h?.weapon?.visible === true && gear2h.weapon.texture === 'greatsword'))
-      throw new Error(`expected 2H weapon visual=greatsword; gear=${JSON.stringify(gear2h)}`)
-    if (gear2h?.shield?.visible) throw new Error(`expected shield visual hidden while 2H equipped; gear=${JSON.stringify(gear2h)}`)
-
     const shieldIdx = Array.isArray(inv2h.bag) ? inv2h.bag.findIndex((s) => s?.id === 'shield_basic') : -1
     if (shieldIdx < 0) throw new Error(`expected shield to be moved into bag; bag=${JSON.stringify(inv2h.bag)}`)
     const moveShieldFail = await page.evaluate(({ shieldIdx }) => globalThis.__dbg?.moveInvItem?.({ type: 'bag', index: shieldIdx }, { type: 'equip', slot: 'shield' }), {
@@ -1126,15 +1094,6 @@ try {
     const invShielded = await getInventory(page)
     if (invShielded?.equipment?.shield !== 'shield_basic')
       throw new Error(`expected shield equipped after move; got ${String(invShielded?.equipment?.shield)} inv=${JSON.stringify(invShielded)}`)
-
-    const gear1h = await page.evaluate(() => {
-      const scene = globalThis.__dbg?.player?.scene
-      return typeof scene?.heroGear?.getDebug === 'function' ? scene.heroGear.getDebug() : null
-    })
-    if (!(gear1h?.weapon?.visible === true && gear1h.weapon.texture === 'sword'))
-      throw new Error(`expected 1H weapon visual=sword; gear=${JSON.stringify(gear1h)}`)
-    if (!(gear1h?.shield?.visible === true && gear1h.shield.texture === 'item-shield'))
-      throw new Error(`expected shield visual=item-shield after re-equip; gear=${JSON.stringify(gear1h)}`)
 
     // Player stats sanity: boots/gloves/chest should modify movement speed, attack speed, and max HP.
     try {
