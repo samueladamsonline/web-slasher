@@ -8,11 +8,13 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "generate:content": "node scripts/generate_content_pack.mjs",
     "smoke": "node scripts/smoke.mjs",
     "playtest": "node scripts/playtest.mjs"
   },
   "devDependencies": {
     "playwright": "^1.58.2",
+    "pngjs": "^7.0.0",
     "typescript": "~5.9.3",
     "vite": "^7.2.4",
     "vitest": "^3.2.4"

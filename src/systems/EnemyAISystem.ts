@@ -93,7 +93,8 @@ export class EnemyAISystem {
     const existing = this.controllers.get(enemy)
     if (existing) return existing
 
-    const next = enemy.kind === 'bat' ? this.createBatController(enemy) : this.createSlimeController(enemy)
+    const batLike = enemy.kind === 'bat' || enemy.kind === 'wisp' || enemy.kind === 'imp' || enemy.kind === 'bone_lord'
+    const next = batLike ? this.createBatController(enemy) : this.createSlimeController(enemy)
     this.controllers.set(enemy, next)
     return next
   }
@@ -468,7 +469,8 @@ export class EnemyAISystem {
               fsm.transition(next.nextMode, c, now)
               return
             }
-            hover(now)
+            if (enemy.kind === 'bone_lord') enemy.setVelocity(0, 0)
+            else hover(now)
           },
         },
         chase: {

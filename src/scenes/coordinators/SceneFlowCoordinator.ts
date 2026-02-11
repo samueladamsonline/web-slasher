@@ -2,7 +2,7 @@ import * as Phaser from 'phaser'
 import type { MapRuntime } from '../../game/MapRuntime'
 import type { WorldState } from '../../game/WorldState'
 import type { Hero } from '../../entities/Hero'
-import type { SaveDataV1, SaveSystem } from '../../systems/SaveSystem'
+import type { Checkpoint, SaveDataV1, SaveSystem } from '../../systems/SaveSystem'
 import type { InputSystem } from '../../systems/InputSystem'
 import type { InventorySystem } from '../../systems/InventorySystem'
 import type { PlayerHealthSystem } from '../../systems/PlayerHealthSystem'
@@ -14,7 +14,6 @@ import type { SpellSlotUI } from '../../ui/SpellSlotUI'
 import type { SpellbookUI } from '../../ui/SpellbookUI'
 
 export type PauseMode = 'pause' | 'inventory' | 'map' | 'spellbook'
-export type Checkpoint = { mapKey: 'overworld' | 'cave'; spawnName: string }
 
 export class SceneFlowCoordinator {
   private scene: Phaser.Scene

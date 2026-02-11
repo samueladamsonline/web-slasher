@@ -10,9 +10,12 @@ export type ItemId =
   // Basic starting gear.
   | 'helmet_basic'
   | 'helmet_pyro'
+  | 'helmet_storm'
   | 'chest_basic'
+  | 'chest_venom'
   | 'gloves_basic'
   | 'boots_basic'
+  | 'boots_rift'
   | 'shield_basic'
   // Early upgraded gear (starter stash).
   | 'boots_swift'
@@ -70,7 +73,23 @@ export const ITEMS: Record<ItemId, ItemDef> = {
     stackable: false,
     equip: { slot: 'helmet', armor: 1, spells: [{ id: 'fireball', level: 1 }] },
   },
+  helmet_storm: {
+    id: 'helmet_storm',
+    name: 'Storm Circlet',
+    kind: 'equipment',
+    texture: 'item-helmet-storm',
+    stackable: false,
+    equip: { slot: 'helmet', armor: 1, spells: [{ id: 'stormlance', level: 1 }] },
+  },
   chest_basic: { id: 'chest_basic', name: 'Leather Tunic', kind: 'equipment', texture: 'item-chest', stackable: false, equip: { slot: 'chest', armor: 2, maxHpBonus: 0 } },
+  chest_venom: {
+    id: 'chest_venom',
+    name: 'Venom Jerkin',
+    kind: 'equipment',
+    texture: 'item-chest-venom',
+    stackable: false,
+    equip: { slot: 'chest', armor: 2, maxHpBonus: 1, spells: [{ id: 'venomshot', level: 1 }] },
+  },
   gloves_basic: {
     id: 'gloves_basic',
     name: 'Cloth Gloves',
@@ -86,6 +105,14 @@ export const ITEMS: Record<ItemId, ItemDef> = {
     texture: 'item-boots',
     stackable: false,
     equip: { slot: 'boots', armor: 1, moveSpeedPct: 0 },
+  },
+  boots_rift: {
+    id: 'boots_rift',
+    name: 'Riftwalk Boots',
+    kind: 'equipment',
+    texture: 'item-boots-rift',
+    stackable: false,
+    equip: { slot: 'boots', armor: 1, moveSpeedPct: 5, spells: [{ id: 'arcaneorb', level: 1 }] },
   },
   shield_basic: { id: 'shield_basic', name: 'Wooden Shield', kind: 'equipment', texture: 'item-shield', stackable: false, equip: { slot: 'shield', armor: 1 } },
 

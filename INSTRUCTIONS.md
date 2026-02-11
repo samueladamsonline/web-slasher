@@ -56,6 +56,13 @@ Invalidation rules:
 ## Pathfinding
 `src/game/pathfinding.ts` provides A* on the collision grid. `MapRuntime.findPath` wraps this and returns tile + world-point paths. `EnemyAISystem` uses `findPath` and `hasLineOfSight` to chase around walls rather than pushing into them.
 
+## Current World Content
+- Maps: `overworld`, `cave`, `marsh`, `ruins`, `citadel`.
+- The legacy overworld/cave coordinates used by integration playtests are intentionally preserved; expansions are added around those anchors.
+- Enemy roster: `slime`, `bat`, `spider`, `skeleton`, `wisp`, `imp`, `golem`, plus boss `bone_lord`.
+- New spell-granting gear: `helmet_storm` -> `stormlance`, `chest_venom` -> `venomshot`, `boots_rift` -> `arcaneorb`.
+- Generated art/data helper: `scripts/generate_content_pack.mjs` rebuilds the expanded tileset, new enemy sprites, and expanded/new maps.
+
 ## Collision & Damage
 Arcade physics colliders handle world blocking. Enemy damage uses timed melee strike windows (windup/active/recovery) with configurable circular hitboxes; `PlayerHealthSystem` applies invulnerability and knockback when a strike lands.
 

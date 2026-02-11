@@ -3,7 +3,7 @@ import { INTERACTABLES, type InteractableDefId, type InteractableKind } from '..
 import type { ItemId } from '../content/items'
 import { ITEMS } from '../content/items'
 import { DEPTH_PROP } from '../game/constants'
-import type { MapKey } from '../game/types'
+import { isMapKey, type MapKey } from '../game/types'
 import { getTiledNumber, getTiledString } from '../game/tiled'
 import type { WorldState } from '../game/WorldState'
 import type { InventorySystem } from './InventorySystem'
@@ -223,7 +223,7 @@ export class InteractionSystem {
         const defToSpawn = def?.lockedWarp?.toSpawn
         const defKeyCost = def?.lockedWarp?.keyCost
 
-        const finalToMap = (toMap === 'overworld' || toMap === 'cave' ? toMap : undefined) ?? defToMap
+        const finalToMap = (isMapKey(toMap) ? toMap : undefined) ?? defToMap
         base.toMap = finalToMap
         base.toSpawn = toSpawn ?? defToSpawn ?? 'player_spawn'
         base.keyCost = Math.max(0, Math.floor(getTiledNumber(o.properties, 'keyCost') ?? defKeyCost ?? 1))

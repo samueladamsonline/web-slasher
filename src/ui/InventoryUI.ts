@@ -64,6 +64,19 @@ export class InventoryUI {
       g.strokeRoundedRect(6, 9, 20, 15, 6)
     })
 
+    ensure('item-helmet-storm', (g) => {
+      g.fillStyle(0x3b2a1a, 1)
+      g.fillRoundedRect(6, 9, 20, 15, 6)
+      g.fillStyle(0x6b4c2a, 1)
+      g.fillRoundedRect(7, 10, 18, 13, 6)
+      g.fillStyle(0x77cbff, 0.95)
+      g.fillRoundedRect(13, 12, 6, 6, 2)
+      g.fillStyle(0xe8fbff, 0.7)
+      g.fillRoundedRect(14, 13, 3, 3, 1)
+      g.lineStyle(3, 0x0a0d12, 0.55)
+      g.strokeRoundedRect(6, 9, 20, 15, 6)
+    })
+
     ensure('item-chest', (g) => {
       g.fillStyle(0x3b2a1a, 1)
       g.fillRoundedRect(7, 7, 18, 20, 5)
@@ -89,6 +102,19 @@ export class InventoryUI {
       g.strokeRoundedRect(7, 7, 18, 20, 5)
       g.lineStyle(2, 0x0a0d12, 0.35)
       g.strokeRoundedRect(11, 11, 10, 4, 2)
+    })
+
+    ensure('item-chest-venom', (g) => {
+      g.fillStyle(0x3b2a1a, 1)
+      g.fillRoundedRect(7, 7, 18, 20, 5)
+      g.fillStyle(0x6b4c2a, 1)
+      g.fillRoundedRect(8, 8, 16, 18, 5)
+      g.fillStyle(0x4cbf56, 0.95)
+      g.fillRoundedRect(12, 11, 8, 4, 2)
+      g.fillStyle(0x92f36e, 0.6)
+      g.fillCircle(14, 12, 1.3)
+      g.lineStyle(3, 0x0a0d12, 0.55)
+      g.strokeRoundedRect(7, 7, 18, 20, 5)
     })
 
     ensure('item-gloves', (g) => {
@@ -158,6 +184,23 @@ export class InventoryUI {
       g.fillRoundedRect(7, 22, 10, 4, 2)
       g.fillRoundedRect(16, 22, 10, 4, 2)
       g.fillStyle(0x76fff8, 0.55)
+      g.fillRoundedRect(9, 13, 4, 2, 1)
+      g.fillRoundedRect(18, 13, 4, 2, 1)
+      g.lineStyle(3, 0x0a0d12, 0.55)
+      g.strokeRoundedRect(8, 11, 7, 14, 3)
+      g.strokeRoundedRect(17, 11, 7, 14, 3)
+      g.strokeRoundedRect(7, 22, 10, 4, 2)
+      g.strokeRoundedRect(16, 22, 10, 4, 2)
+    })
+
+    ensure('item-boots-rift', (g) => {
+      g.fillStyle(0x6b4c2a, 1)
+      g.fillRoundedRect(8, 11, 7, 14, 3)
+      g.fillRoundedRect(17, 11, 7, 14, 3)
+      g.fillStyle(0x3b2a1a, 1)
+      g.fillRoundedRect(7, 22, 10, 4, 2)
+      g.fillRoundedRect(16, 22, 10, 4, 2)
+      g.fillStyle(0x9a67ff, 0.8)
       g.fillRoundedRect(9, 13, 4, 2, 1)
       g.fillRoundedRect(18, 13, 4, 2, 1)
       g.lineStyle(3, 0x0a0d12, 0.55)

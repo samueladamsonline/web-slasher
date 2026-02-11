@@ -1,4 +1,4 @@
-import type { MapKey } from '../game/types'
+import { isMapKey, type MapKey } from '../game/types'
 import type { WorldState, WorldStateSnapshot } from '../game/WorldState'
 import type { InventorySnapshot, InventorySystem } from './InventorySystem'
 
@@ -54,10 +54,6 @@ export class LocalStorageSaveBackend implements SaveBackend {
       throw new Error(`Failed to clear save: ${String((e as any)?.message ?? e)}`)
     }
   }
-}
-
-function isMapKey(v: unknown): v is MapKey {
-  return v === 'overworld' || v === 'cave'
 }
 
 function safeJsonParse(raw: string): unknown {

@@ -1,7 +1,7 @@
 import { TILE_SIZE } from '../game/constants'
 import type { StatusEffect } from '../game/statusEffects'
 
-export type SpellId = 'fireball' | 'iceblast' | 'icebolt'
+export type SpellId = 'fireball' | 'iceblast' | 'icebolt' | 'stormlance' | 'venomshot' | 'arcaneorb'
 
 export type SpellGrant = { id: SpellId; level: number }
 
@@ -91,6 +91,62 @@ export const SPELLS: Record<SpellId, SpellDef> = {
         speedTilesPerSec: 14,
         cooldownMs: 520,
         onHit: [{ kind: 'slow', moveSpeedMul: 0.5, durationMs: 1000 }],
+      },
+    },
+  },
+  stormlance: {
+    kind: 'projectile',
+    id: 'stormlance',
+    name: 'Storm Lance',
+    projectileTexture: 'spell-stormlance',
+    iconTexture: 'spell-icon-stormlance',
+    coreColor: 0xbef6ff,
+    glowColor: 0x77cbff,
+    radius: 5,
+    ttlMs: 2500,
+    levels: {
+      1: {
+        damage: 1.5,
+        speedTilesPerSec: 17,
+        cooldownMs: 430,
+      },
+    },
+  },
+  venomshot: {
+    kind: 'projectile',
+    id: 'venomshot',
+    name: 'Venom Shot',
+    projectileTexture: 'spell-venomshot',
+    iconTexture: 'spell-icon-venomshot',
+    coreColor: 0x92f36e,
+    glowColor: 0x4cbf56,
+    radius: 5,
+    ttlMs: 2500,
+    levels: {
+      1: {
+        damage: 0.8,
+        speedTilesPerSec: 16,
+        cooldownMs: 360,
+        // Temporary poison stand-in until DOT is implemented.
+        onHit: [{ kind: 'slow', moveSpeedMul: 0.85, durationMs: 1200 }],
+      },
+    },
+  },
+  arcaneorb: {
+    kind: 'projectile',
+    id: 'arcaneorb',
+    name: 'Arcane Orb',
+    projectileTexture: 'spell-arcaneorb',
+    iconTexture: 'spell-icon-arcaneorb',
+    coreColor: 0xd6a7ff,
+    glowColor: 0x9a67ff,
+    radius: 7,
+    ttlMs: 2800,
+    levels: {
+      1: {
+        damage: 2,
+        speedTilesPerSec: 11,
+        cooldownMs: 700,
       },
     },
   },
